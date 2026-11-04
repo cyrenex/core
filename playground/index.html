@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>cyrenex playground</title>
+    <link rel="stylesheet" href="/web/style.css" />
+  </head>
+  <body>
+    <main>
+      <h1>cyrenex</h1>
+      <p id="hello">…</p>
+
+      <section>
+        <h2>
+          Todos <small>(per <code>x-user</code>, injected via pondi)</small>
+        </h2>
+        <label>user <input id="user" value="ada" /></label>
+        <form id="add">
+          <input name="title" placeholder="What needs doing?" autocomplete="off" />
+          <button>Add</button>
+        </form>
+        <ul id="todos"></ul>
+      </section>
+
+      <section>
+        <h2>WebSocket</h2>
+        <form id="ws-form">
+          <input name="message" placeholder="say something" autocomplete="off" />
+          <button>Send</button>
+        </form>
+        <pre id="ws-log"></pre>
+      </section>
+    </main>
+    <script type="module" src="/web/main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,30 @@
+{
+  "name": "cyrenex-monorepo",
+  "version": "0.0.0",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyrenex/core.git"
+  },
+  "type": "module",
+  "scripts": {
+    "ready": "vp check && vp run -r test && vp run -r build",
+    "build": "vp run cyrenex#build",
+    "dev": "vp run cyrenex#build && vp run playground#dev",
+    "dev:node": "vp run cyrenex#build && vp run playground#dev:node",
+    "test": "vp run cyrenex#test"
+  },
+  "devDependencies": {
+    "vite-plus": "catalog:"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.16.1",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

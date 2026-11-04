@@ -1,0 +1,26 @@
+{
+  "name": "playground",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vp dev",
+    "dev:node": "vp dev --mode node",
+    "build": "vp build",
+    "start": "bun server/main.ts",
+    "start:node": "node server/main.ts"
+  },
+  "dependencies": {
+    "@elysia/eden": "catalog:",
+    "@elysia/node": "catalog:",
+    "@elysia/static": "catalog:",
+    "cyrenex": "workspace:*",
+    "elysia": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  }
+}

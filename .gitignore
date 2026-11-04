@@ -1,0 +1,12 @@
+node_modules
+dist
+*.log
+.DS_Store
+
+.env
+.env.*
+!.env.example
+
+# Copied from the repository root on prepack
+packages/cyrenex/README*.md
+packages/cyrenex/LICENSE

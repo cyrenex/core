@@ -1,0 +1,98 @@
+{
+  "name": "cyrenex",
+  "version": "0.0.0",
+  "description": "Full-stack Elysia with Vite dev server, pondi dependency injection and Eden types.",
+  "keywords": [
+    "bun",
+    "dependency-injection",
+    "eden",
+    "elysia",
+    "fullstack",
+    "vite",
+    "vite-plugin"
+  ],
+  "homepage": "https://github.com/cyrenex/core#readme",
+  "bugs": {
+    "url": "https://github.com/cyrenex/core/issues"
+  },
+  "license": "MIT",
+  "author": "byc <bycrxemail@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyrenex/core.git",
+    "directory": "packages/cyrenex"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "cyrenex-source": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./client": {
+      "cyrenex-source": "./src/client.ts",
+      "default": "./dist/client.mjs"
+    },
+    "./node": {
+      "cyrenex-source": "./src/node.ts",
+      "default": "./dist/node.mjs"
+    },
+    "./static": {
+      "cyrenex-source": "./src/static.ts",
+      "default": "./dist/static.mjs"
+    },
+    "./vite": {
+      "cyrenex-source": "./src/vite/index.ts",
+      "default": "./dist/vite.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "prepublishOnly": "vp run build",
+    "prepack": "node -e \"for (const f of ['README.md', 'README.zh-CN.md', 'LICENSE']) require('node:fs').copyFileSync('../../' + f, f)\""
+  },
+  "dependencies": {
+    "@cyrenex/pondi": "catalog:",
+    "env-runner": "catalog:",
+    "srvx": "catalog:"
+  },
+  "devDependencies": {
+    "@elysia/eden": "catalog:",
+    "@elysia/node": "catalog:",
+    "@elysia/static": "catalog:",
+    "@types/node": "catalog:",
+    "elysia": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "@elysia/node": "^1.4.6",
+    "@elysia/static": "^1.4.11",
+    "elysia": "^1.4.30",
+    "vite": "^8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@elysia/node": {
+      "optional": true
+    },
+    "@elysia/static": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}
