@@ -12,9 +12,13 @@
     "build": "vp run cyrenex#build",
     "dev": "vp run cyrenex#build && vp run playground#dev",
     "dev:node": "vp run cyrenex#build && vp run playground#dev:node",
-    "test": "vp run cyrenex#test"
+    "test": "vp run cyrenex#test",
+    "changeset": "changeset",
+    "release": "changeset publish"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "catalog:",
+    "@changesets/cli": "catalog:",
     "vite-plus": "catalog:"
   },
   "devEngines": {

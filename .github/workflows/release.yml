@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    branches: [master]
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write # push the version commit
+  pull-requests: write # open the release PR
+  id-token: write # npm trusted publishing (OIDC)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: voidzero-dev/setup-vp@v1.22.0
+        with:
+          node-version: "24"
+          cache: true
+      - run: vp check
+      - run: vp run -r test
+      - id: changesets
+        uses: changesets/action@v1
+        with:
+          version: vp exec changeset version
+          publish: vp run release
+          title: "chore(release): version packages"
+          commit: "chore(release): version packages"
+          createGithubReleases: true # tag and release on GitHub after npm publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # changesets/action only accepts a static title, so add the version afterwards.
+      - if: steps.changesets.outputs.pullRequestNumber
+        run: |
+          git fetch origin changeset-release/master
+          pkg=$(git show origin/changeset-release/master:packages/cyrenex/package.json)
+          name=$(jq -r .name <<<"$pkg")
+          version=$(jq -r .version <<<"$pkg")
+          gh pr edit "$PR" --title "chore(release): $name@$version"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR: ${{ steps.changesets.outputs.pullRequestNumber }}
