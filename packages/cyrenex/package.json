@@ -1,6 +1,6 @@
 {
   "name": "cyrenex",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Full-stack Elysia with Vite dev server, pondi dependency injection and Eden types.",
   "keywords": [
     "bun",
