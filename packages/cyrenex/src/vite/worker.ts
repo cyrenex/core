@@ -1,19 +1,19 @@
 // Runs inside the Node.js / Bun child process. Loads the app through Vite's ModuleRunner and
 // listens on a random internal port that the dev server forwards to.
-import type { Socket } from "node:net";
-
 import { createViteTransport } from "env-runner/vite";
 import { createNodeImportMeta, ModuleRunner } from "vite/module-runner";
 
-import { stopApp } from "../stop.ts";
-import { warmup } from "../warmup.ts";
+import { elysia } from "./elysia.ts";
 import type {
-  AppModule,
+  ServerAdapter,
+  ServerHandle,
   WorkerControlMessage,
   WorkerData,
   WorkerInitMessage,
-  WorkerServer,
 } from "./types.ts";
+
+const HOST = "127.0.0.1";
+const adapter: ServerAdapter = elysia;
 
 const send = (message: unknown): void => {
   if (process.connected) process.send?.(message);
@@ -41,19 +41,14 @@ const runner = new ModuleRunner({
   ),
 });
 
-let app: AppModule["default"] | undefined;
-let server: WorkerServer | undefined;
+let handle: ServerHandle | undefined;
 let stopping = false;
-const connections = new Set<Socket>();
 
 async function stop(): Promise<void> {
   if (stopping) return;
   stopping = true;
   try {
-    // @elysia/node does not forward the force flag, so close its sockets explicitly.
-    for (const socket of connections) socket.destroy();
-    // Runs onStop hooks, which dispose the Pond.
-    if (app) await stopApp(app, server);
+    await handle?.close();
     await runner.close();
     send({ event: "exit" });
   } catch (error) {
@@ -71,37 +66,10 @@ process.on("message", (message: WorkerControlMessage) => {
 });
 
 try {
-  app = (await runner.import<AppModule>(data.entry)).default;
-
-  if (!app || typeof app.listen !== "function" || typeof app.fetch !== "function") {
-    throw new TypeError("cyrenex: entry must default-export an Elysia app.");
-  }
-  if (app.server) {
-    throw new Error("cyrenex: export the app without calling .listen().");
-  }
-
-  // Async plugins must finish registering routes before the listener starts.
-  await app.modules;
-  // `eager` singletons from pondi(): fail startup here, not on the first request.
-  await warmup(app);
-
-  const listening = Promise.withResolvers<WorkerServer>();
-  app.listen({ port: 0, hostname: "127.0.0.1" }, (value) => {
-    listening.resolve(value as unknown as WorkerServer);
-  });
-  server = await listening.promise;
-  await server.raw?.ready();
-
-  server.raw?.node?.server?.on("connection", (socket) => {
-    connections.add(socket);
-    socket.once("close", () => connections.delete(socket));
-  });
-
-  const address = server.raw?.node?.server?.address();
-  const port = address && typeof address === "object" ? address.port : server.port;
-  if (!port) throw new Error("cyrenex: Elysia did not report a listening port.");
-
-  send({ address: { host: "127.0.0.1", port } });
+  const entry = await runner.import<{ default?: unknown }>(data.entry);
+  handle = adapter(entry.default);
+  const { port } = await handle.listen({ hostname: HOST });
+  send({ address: { host: HOST, port } });
 } catch (error) {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   // Flush the failure over IPC before exiting; the dev server formats and logs it.

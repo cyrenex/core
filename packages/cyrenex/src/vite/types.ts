@@ -1,7 +1,3 @@
-import type { Server as HttpServer } from "node:http";
-
-import type { AnyElysia } from "elysia";
-
 /** Runtime executable used to launch the isolated application process. */
 export type Runtime = "node" | "bun";
 
@@ -67,19 +63,18 @@ export interface WorkerControlMessage {
   event?: string;
 }
 
-/** Listener information returned by the application's Elysia adapter. */
-export interface WorkerServer {
-  /** Bound port reported directly by Bun; Node's actual port is read from `raw`. */
-  port: number;
-  stop(force?: boolean): unknown;
-  raw?: {
-    ready(): Promise<unknown>;
-    node?: {
-      server?: HttpServer;
-    };
-  };
-}
+/**
+ * Framework side of the dev worker. Receives the entry's default export, validates it
+ * synchronously, and returns a handle the worker drives without knowing the framework.
+ */
+export type ServerAdapter = (exported: unknown) => ServerHandle;
 
-export interface AppModule {
-  default: AnyElysia;
+export interface ServerHandle {
+  /** Run startup work (plugins, warm-up) and listen on a random port of `hostname`. */
+  listen(options: { hostname: string }): Promise<{ port: number }>;
+  /**
+   * Stop the server and release app resources. May be called before `listen` settles or
+   * after it failed, and must still release whatever was acquired.
+   */
+  close(): Promise<void>;
 }
