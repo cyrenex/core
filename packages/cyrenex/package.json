@@ -58,7 +58,6 @@
     "dev": "vp pack --watch",
     "test": "vp test",
     "check": "vp check",
-    "prepublishOnly": "vp run build",
     "prepack": "node -e \"for (const f of ['README.md', 'README.zh-CN.md', 'LICENSE']) require('node:fs').copyFileSync('../../' + f, f)\""
   },
   "dependencies": {

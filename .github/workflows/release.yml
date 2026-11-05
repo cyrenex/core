@@ -22,6 +22,8 @@ jobs:
           cache: true
       - run: vp check
       - run: vp run -r test
+      # Build here, not in a publish lifecycle script, so failures show their output.
+      - run: vp run -r build
       - id: changesets
         uses: changesets/action@v1
         with:
