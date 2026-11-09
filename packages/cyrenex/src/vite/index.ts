@@ -22,7 +22,16 @@ function resolveOptions(options: CyrenexOptions): ResolvedOptions {
     routes: options.routes ?? ["/api", "/ws"],
     watch: options.watch ?? [],
     dts: options.dts ?? "cyrenex-env.d.ts",
+    execArgv: [...inspectArgv(options.inspect), ...(options.execArgv ?? [])],
+    env: options.env ?? {},
+    shutdownTimeout: options.shutdownTimeout ?? 1000,
   };
+}
+
+function inspectArgv(inspect: CyrenexOptions["inspect"]): string[] {
+  if (inspect === undefined || inspect === false) return [];
+  if (inspect === true) return ["--inspect=127.0.0.1:9229"];
+  return [`--inspect=${typeof inspect === "number" ? `127.0.0.1:${inspect}` : inspect}`];
 }
 
 export function renderDts(dtsFile: string, entryFile: string): string {

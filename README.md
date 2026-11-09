@@ -237,16 +237,24 @@ cyrenex({
   routes: ["/api", "/ws"],
   watch: ["templates/**"],
   dts: "cyrenex-env.d.ts",
+  inspect: false,
+  execArgv: [],
+  env: {},
+  shutdownTimeout: 1000,
 });
 ```
 
-| Option    | Default                                | Description                                                                       |
-| --------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `entry`   | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
-| `runtime` | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
-| `routes`  | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten                  |
-| `watch`   | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
-| `dts`     | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
+| Option            | Default                                | Description                                                                       |
+| ----------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
+| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten                  |
+| `watch`           | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
+| `dts`             | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
+| `inspect`         | `false`                                | Enable the inspector: `true` (`127.0.0.1:9229`), a port, or `"host:port"`         |
+| `execArgv`        | `[]`                                   | Extra runtime flags for the app process                                           |
+| `env`             | `{}`                                   | Variables for the app process, over the shell and `.env` files                    |
+| `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process      |
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
 
@@ -254,10 +262,14 @@ The entry directory and every module loaded through Vite are always watched. `/a
 
 The app process gets every variable from Vite's `.env` files (`.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local` in `envDir`), not only `VITE_*` ones: it is server code, so nothing reaches the browser. Variables already set in the shell win, as in Vite. Editing a `.env` file restarts the dev server; `envDir: false` disables loading.
 
+### Debugging
+
+`inspect: true` starts the app with `--inspect=127.0.0.1:9229` on either runtime. The port is released before the next process starts, so it stays the same across restarts and a debugger set to reconnect (VS Code's `"restart": true` attach configuration) follows the app. For Bun, open the printed `debug.bun.sh` URL or use the Bun extension.
+
 ### Restarts
 
 - File changes are debounced by 100ms and queued; requests arriving mid-restart wait for the new process.
-- The old process gets a shutdown message, runs `app.stop()` (so `onStop` and `pond.dispose()` run), and is killed after 1 second.
+- The old process gets a shutdown message, runs `app.stop()` (so `onStop` and `pond.dispose()` run), and is killed after `shutdownTimeout` (1 second by default).
 - If the app is unavailable, HTTP returns `503`; forwarding errors return `502`.
 - Business WebSockets are closed on restart. Reconnect on `close` in the client; Vite's HMR socket is untouched.
 - After a startup error, fix the file and it starts again.

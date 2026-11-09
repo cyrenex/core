@@ -34,6 +34,32 @@ export interface CyrenexOptions {
    * @default "cyrenex-env.d.ts"
    */
   dts?: string | false;
+
+  /**
+   * Start the app with the inspector enabled: `true` for `127.0.0.1:9229`, a port, or
+   * `"host:port"`. The port stays the same across restarts, so a debugger can reattach.
+   * @default false
+   */
+  inspect?: boolean | number | string;
+
+  /**
+   * Extra runtime flags for the app process, e.g. `["--enable-source-maps"]`.
+   * @default []
+   */
+  execArgv?: string[];
+
+  /**
+   * Variables for the app process, on top of the shell and the `.env` files.
+   * @default {}
+   */
+  env?: Record<string, string>;
+
+  /**
+   * How long a restart waits for `app.stop()` (and the Pond's disposal) before killing the
+   * old process, in milliseconds.
+   * @default 1000
+   */
+  shutdownTimeout?: number;
 }
 
 export interface ResolvedOptions {
@@ -42,6 +68,9 @@ export interface ResolvedOptions {
   routes: string[];
   watch: false | string[];
   dts: string | false;
+  execArgv: string[];
+  env: Record<string, string>;
+  shutdownTimeout: number;
 }
 
 /** Bootstrap data serialized by env-runner and delivered to the child over IPC. */

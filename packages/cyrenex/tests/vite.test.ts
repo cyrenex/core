@@ -124,6 +124,46 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
     expect(await json(`${url}/api/env`)).toEqual(["base", "mode"]);
   });
 
+  test("passes env, runtime flags and the inspector to the app process", async () => {
+    const { url } = await start(
+      {
+        "server/app.ts": app(
+          "flags",
+          `.get("/api/flags", () => ({ argv: process.execArgv, a: process.env.A }))`,
+        ),
+        ".env": "A=file",
+      },
+      { env: { A: "option" }, execArgv: ["--no-warnings"], inspect: "127.0.0.1:0" },
+    );
+    expect(await json(`${url}/api/flags`)).toEqual({
+      argv: ["--inspect=127.0.0.1:0", "--no-warnings"],
+      a: "option",
+    });
+  });
+
+  test("waits shutdownTimeout for app.stop() before killing the process", async () => {
+    const marker = join(TMP, `stopped-${Math.random().toString(36).slice(2)}`);
+    const slowStop = (message: string) =>
+      app(
+        message,
+        `.onStop(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+          (await import("node:fs")).writeFileSync(process.env.MARKER, "stopped");
+        })`,
+      );
+    const { url, write } = await start(
+      { "server/app.ts": slowStop("one") },
+      { shutdownTimeout: 5000, env: { MARKER: marker } },
+    );
+
+    write("server/app.ts", slowStop("two"));
+    await until(
+      () => json(`${url}/api/hello`),
+      (body) => body.message === "two",
+    );
+    expect(readFileSync(marker, "utf8")).toBe("stopped");
+  });
+
   test("forwards WebSocket upgrades", async () => {
     const { url } = await start({ "server/app.ts": app("ws") });
     const ws = new WebSocket(`${url.replace("http", "ws")}/ws`);

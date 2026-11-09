@@ -237,16 +237,24 @@ cyrenex({
   routes: ["/api", "/ws"],
   watch: ["templates/**"],
   dts: "cyrenex-env.d.ts",
+  inspect: false,
+  execArgv: [],
+  env: {},
+  shutdownTimeout: 1000,
 });
 ```
 
-| 配置      | 默认值                                 | 说明                                                  |
-| --------- | -------------------------------------- | ----------------------------------------------------- |
-| `entry`   | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root            |
-| `runtime` | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                 |
-| `routes`  | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径          |
-| `watch`   | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启 |
-| `dts`     | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成     |
+| 配置              | 默认值                                 | 说明                                                           |
+| ----------------- | -------------------------------------- | -------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root                     |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                          |
+| `routes`          | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径                   |
+| `watch`           | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启          |
+| `dts`             | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成              |
+| `inspect`         | `false`                                | 开启调试器：`true`（`127.0.0.1:9229`）、端口号或 `"host:port"` |
+| `execArgv`        | `[]`                                   | 应用进程额外的运行时参数                                       |
+| `env`             | `{}`                                   | 应用进程的环境变量，覆盖 shell 与 `.env` 文件                  |
+| `shutdownTimeout` | `1000`                                 | 重启时等待 `app.stop()` 的毫秒数，超时强制结束旧进程           |
 
 入口所在目录和所有经 Vite 加载的模块始终会被监听。`/api` 匹配 `/api` 和 `/api/users`，不匹配 `/apix`。
 
@@ -254,10 +262,14 @@ cyrenex({
 
 应用进程会拿到 Vite `.env` 文件（`envDir` 下的 `.env`、`.env.local`、`.env.[mode]`、`.env.[mode].local`）中的全部变量，而不只是 `VITE_*`：这是服务端代码，不会进入浏览器。与 Vite 一致，shell 中已设置的变量优先。修改 `.env` 会重启开发服务器；`envDir: false` 可关闭加载。
 
+### 调试
+
+`inspect: true` 会以 `--inspect=127.0.0.1:9229` 启动应用，两种运行时都支持。下一个进程启动前端口已被释放，所以重启后端口不变，配置了自动重连的调试器（VS Code attach 配置中的 `"restart": true`）会跟着应用重新连接。Bun 可打开输出的 `debug.bun.sh` 链接或使用 Bun 扩展。
+
 ### 重启
 
 - 文件变更以 100ms 去抖并进入串行队列，重启期间到达的请求会等待新进程就绪。
-- 旧进程收到关闭消息后执行 `app.stop()`（触发 `onStop` 与 `pond.dispose()`），超过 1 秒会被强制结束。
+- 旧进程收到关闭消息后执行 `app.stop()`（触发 `onStop` 与 `pond.dispose()`），超过 `shutdownTimeout`（默认 1 秒）会被强制结束。
 - 应用不可用时 HTTP 返回 `503`，转发异常返回 `502`。
 - 重启会断开业务 WebSocket，客户端需在 `close` 时自行重连；Vite 的 HMR 连接不受影响。
 - 启动失败后，修正文件即可再次启动。

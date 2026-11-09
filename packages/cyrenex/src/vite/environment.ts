@@ -23,6 +23,7 @@ export class ElysiaEnvironment extends DevEnvironment {
 
   private readonly workerEntry: string;
   private readonly process: ProcessOptions;
+  private readonly shutdownTimeout: number;
   /** Absolute application entry used by the child module runner. */
   private readonly entry: string;
   /** Matches extra watch patterns and the entry directory, excluding dependency stores. */
@@ -64,8 +65,13 @@ export class ElysiaEnvironment extends DevEnvironment {
       runtime: options.runtime,
       // Every variable of `.env`, `.env.local`, `.env.[mode]`… not only `VITE_*`: the app is
       // server code. Existing process variables win, as in Vite. Vite restarts on changes.
-      env: config.envDir === false ? {} : loadEnv(config.mode, config.envDir, ""),
+      env: {
+        ...(config.envDir === false ? {} : loadEnv(config.mode, config.envDir, "")),
+        ...options.env,
+      },
+      execArgv: options.execArgv,
     };
+    this.shutdownTimeout = options.shutdownTimeout;
     this.watching = options.watch !== false;
     this.workerEntry = fileURLToPath(
       new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url),
@@ -176,7 +182,7 @@ export class ElysiaEnvironment extends DevEnvironment {
 
       try {
         // Graceful shutdown runs app.stop() → onStop → pond.dispose() in the old process.
-        await this.currentRunner?.shutdown(1000);
+        await this.currentRunner?.shutdown(this.shutdownTimeout);
         if (this.disposed) return;
 
         this.currentRunner = new RuntimeProcessRunner(
@@ -216,7 +222,7 @@ export class ElysiaEnvironment extends DevEnvironment {
     clearTimeout(this.timer);
     this.cleanup?.();
     for (const socket of this.sockets) socket.destroy();
-    await this.backend.shutdown(1000);
+    await this.backend.shutdown(this.shutdownTimeout);
     await this.task;
     await super.close();
   }
