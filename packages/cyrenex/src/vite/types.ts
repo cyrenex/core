@@ -24,9 +24,11 @@ export interface CyrenexOptions {
 
   /**
    * Path prefixes forwarded to the app, matched by whole segments, without rewriting.
+   * `"auto"` forwards the first segment of every route the app defines (`/api/users/:id` →
+   * `/api`), re-read on each restart; routes such as `/` or `/:id` are skipped with a warning.
    * @default ["/api", "/ws"]
    */
-  routes?: string[];
+  routes?: string[] | "auto";
 
   /**
    * Extra files, directories or globs (relative to Vite root) that restart the app.
@@ -73,7 +75,7 @@ export interface CyrenexOptions {
 export interface ResolvedOptions {
   entry: string;
   runtime: Runtime;
-  routes: string[];
+  routes: string[] | "auto";
   watch: false | string[];
   dts: string | false;
   execArgv: string[];
@@ -106,9 +108,19 @@ export interface WorkerControlMessage {
  */
 export type ServerAdapter = (exported: unknown) => ServerHandle;
 
+/** Sent by the worker once the app listens, next to env-runner's `address`. */
+export interface WorkerReadyMessage {
+  address: { host: string; port: number };
+  /** Route paths defined by the app, for `routes: "auto"`. */
+  paths: string[];
+}
+
 export interface ServerHandle {
-  /** Run startup work (plugins, warm-up) and listen on a random port of `hostname`. */
-  listen(options: { hostname: string }): Promise<{ port: number }>;
+  /**
+   * Run startup work (plugins, warm-up) and listen on a random port of `hostname`. Returns the
+   * port and the app's route paths.
+   */
+  listen(options: { hostname: string }): Promise<{ port: number; paths: string[] }>;
   /**
    * Stop the server and release app resources. May be called before `listen` settles or
    * after it failed, and must still release whatever was acquired.

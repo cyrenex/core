@@ -57,7 +57,7 @@ export const elysia: ServerAdapter = (exported) => {
       const address = http?.address();
       const port = address && typeof address === "object" ? address.port : server.port;
       if (!port) throw new Error("cyrenex: Elysia did not report a listening port.");
-      return { port };
+      return { port, paths: app.routes.map((route) => route.path) };
     },
 
     async close() {

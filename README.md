@@ -255,7 +255,7 @@ cyrenex({
 | ----------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
 | `entry`           | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
 | `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
-| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten                  |
+| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten; or `"auto"`     |
 | `watch`           | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
 | `dts`             | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
 | `inspect`         | `false`                                | Enable the inspector: `true` (`127.0.0.1:9229`), a port, or `"host:port"`         |
@@ -264,6 +264,8 @@ cyrenex({
 | `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process      |
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
+
+With `routes: "auto"`, the forwarded prefixes are the first segments of the routes your app defines (`/api/users/:id` → `/api`), read again on every restart, so adding a `/rpc` route needs no config change. Routes whose first segment is empty, a parameter or a wildcard (`/`, `/:slug`, `*`) would take every page from the frontend; they are skipped with a warning.
 
 ### Environment variables
 

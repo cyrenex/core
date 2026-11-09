@@ -11,8 +11,9 @@ import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
 import { RuntimeProcessRunner } from "./process.ts";
 import type { ProcessOptions } from "./process.ts";
+import { matchesRoutes, normalizeRoutes, prefixesOf } from "./routes.ts";
 import { RESTART_EVENT } from "./types.ts";
-import type { ResolvedOptions, RestartEvent } from "./types.ts";
+import type { ResolvedOptions, RestartEvent, WorkerReadyMessage } from "./types.ts";
 
 /** Owns request forwarding and process replacement for the Elysia app. */
 export class ElysiaEnvironment extends DevEnvironment {
@@ -33,7 +34,11 @@ export class ElysiaEnvironment extends DevEnvironment {
   private readonly watchRoots: string[];
   private readonly watching: boolean;
   /** Normalized path prefixes; forwarding preserves the original URL. */
-  private readonly routes: string[];
+  private routes: string[];
+  /** Read the prefixes from the app on every start instead of the options. */
+  private readonly autoRoutes: boolean;
+  /** Paths `routes: "auto"` last warned about. */
+  private skipped = "";
   /** Business upgrade sockets, closed before their owning child is replaced. */
   private readonly sockets = new Set<Socket>();
   /** Serial restart queue, also awaited by incoming requests and upgrades. */
@@ -81,9 +86,8 @@ export class ElysiaEnvironment extends DevEnvironment {
     this.workerEntry = fileURLToPath(
       new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url),
     );
-    this.routes = options.routes.map((route) =>
-      route === "/" ? route : route.replace(/\/+$/, ""),
-    );
+    this.autoRoutes = options.routes === "auto";
+    this.routes = options.routes === "auto" ? [] : normalizeRoutes(options.routes);
 
     const patterns = [
       `${normalizePath(dirname(entry))}/**`,
@@ -99,10 +103,7 @@ export class ElysiaEnvironment extends DevEnvironment {
   }
 
   matches(url: string): boolean {
-    const pathname = new URL(url, "http://localhost").pathname;
-    return this.routes.some(
-      (route) => route === "/" || pathname === route || pathname.startsWith(`${route}/`),
-    );
+    return matchesRoutes(this.routes, new URL(url, "http://localhost").pathname);
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -198,11 +199,13 @@ export class ElysiaEnvironment extends DevEnvironment {
         await this.currentRunner?.shutdown(this.shutdownTimeout);
         if (this.disposed) return;
 
-        this.currentRunner = new RuntimeProcessRunner(
+        const runner = new RuntimeProcessRunner(
           this.workerEntry,
           { entry: this.entry, environment: this.name },
           this.process,
         );
+        this.currentRunner = runner;
+        if (this.autoRoutes) runner.onMessage((message) => this.adoptRoutes(message));
         await this.backend.reload(this.currentRunner);
         await this.currentRunner.waitForReady();
 
@@ -229,6 +232,28 @@ export class ElysiaEnvironment extends DevEnvironment {
         this.fail(message);
       }
     });
+  }
+
+  /** `routes: "auto"`: forward what the app that just started defines. */
+  private adoptRoutes(message: unknown): void {
+    const ready = message as Partial<WorkerReadyMessage> | undefined;
+    if (!ready?.address || !Array.isArray(ready.paths)) return;
+    const { prefixes, skipped } = prefixesOf(ready.paths);
+    if (prefixes.join() !== this.routes.join()) {
+      this.logger.info(`forwarding ${prefixes.join(", ") || "nothing"}`, { timestamp: true });
+    }
+    this.routes = prefixes;
+    // Warn once per change, not on every restart.
+    const skippedKey = skipped.join();
+    if (skippedKey === this.skipped) return;
+    this.skipped = skippedKey;
+    if (skipped.length) {
+      this.logger.warn(
+        `routes: "auto" cannot forward ${skipped.join(", ")}; they would shadow the frontend. ` +
+          "Move them under a prefix or list routes explicitly.",
+        { timestamp: true },
+      );
+    }
   }
 
   /** Show a startup failure in Vite's error overlay. */

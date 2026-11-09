@@ -129,6 +129,18 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
     );
   });
 
+  test('routes: "auto" forwards what the app defines', async () => {
+    const { url, write } = await start({ "server/app.ts": app("auto") }, { routes: "auto" });
+    expect(await json(`${url}/api/hello`)).toMatchObject({ message: "auto" });
+    expect((await fetch(`${url}/rpc/ping`)).headers.get("content-type")).toContain("text/html");
+
+    write("server/app.ts", app("auto", `.get("/rpc/ping", () => "pong")`));
+    await until(
+      () => fetch(`${url}/rpc/ping`).then((r) => r.text()),
+      (text) => text === "pong",
+    );
+  });
+
   test("loads every .env variable into the app process", async () => {
     const { url } = await start({
       "server/app.ts": app("env", `.get("/api/env", () => [process.env.A, process.env.B])`),

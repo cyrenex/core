@@ -10,6 +10,7 @@ import type {
   WorkerControlMessage,
   WorkerData,
   WorkerInitMessage,
+  WorkerReadyMessage,
 } from "./types.ts";
 
 const HOST = "127.0.0.1";
@@ -68,8 +69,8 @@ process.on("message", (message: WorkerControlMessage) => {
 try {
   const entry = await runner.import<{ default?: unknown }>(data.entry);
   handle = adapter(entry.default);
-  const { port } = await handle.listen({ hostname: HOST });
-  send({ address: { host: HOST, port } });
+  const { port, paths } = await handle.listen({ hostname: HOST });
+  send({ address: { host: HOST, port }, paths } satisfies WorkerReadyMessage);
 } catch (error) {
   const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
   // Flush the failure over IPC before exiting; the dev server formats and logs it.
