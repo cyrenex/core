@@ -15,13 +15,14 @@
 > [!NOTE]
 > 一条 `vp dev`，前端和 Elysia API 同源访问。API 跑在独立的 Bun 或 Node.js 进程里，文件变更即重启，退出前释放所有资源。
 
-搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、六个入口：
+搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、七个入口：
 
 | 入口              | 在哪里用          | 内容                                                                 |
 | ----------------- | ----------------- | -------------------------------------------------------------------- |
 | `cyrenex`         | 服务端            | `pondi`、`inject`、`RequestContext`、`warmup`，以及 pondi 的全部 API |
 | `cyrenex/node`    | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter                  |
 | `cyrenex/static`  | 服务端（生产）    | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                         |
+| `cyrenex/serve`   | 服务端（生产）    | `serve(app)`：预热、静态资源、监听与优雅退出                         |
 | `cyrenex/testing` | 测试              | `override(app, ...)` 替换已导出应用的 provider                       |
 | `cyrenex/vite`    | `vite.config.ts`  | 在子进程中运行应用，转发 `/api` 与 `/ws`，生成类型声明               |
 | `cyrenex/client`  | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的相对路径  |
@@ -320,24 +321,14 @@ vp dev --mode node  # Node.js
 
 ## 生产环境
 
-`vp build` 构建前端，服务端入口由你用原生 Elysia 自己编写：
+`vp build` 构建前端，服务端入口用 `cyrenex/serve` 几行即可：
 
 ```ts
 // server/main.ts
-import { fileURLToPath } from "node:url";
-import { warmup } from "cyrenex";
-import { staticPlugin } from "cyrenex/static";
+import { serve } from "cyrenex/serve";
 import app from "./app.ts";
 
-await warmup(app); // 创建 `eager` 中的 singleton，失败则中止启动
-
-app
-  .use(await staticPlugin({ assets: fileURLToPath(new URL("../dist", import.meta.url)) }))
-  .listen(Number(process.env.PORT ?? 3000));
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => void app.stop().finally(() => process.exit(0)));
-}
+await serve(app);
 ```
 
 ```bash
@@ -345,7 +336,14 @@ bun server/main.ts
 node server/main.ts
 ```
 
-`app.stop()` 会执行 `onStop` 钩子并释放 Pond；在 Node.js 上需要使用 `cyrenex/node` adapter。
+`serve(app, options?)` 依次完成生产入口都需要做的事：
+
+1. 创建 `eager` 中的 singleton（`warmup(app)`），失败则在监听之前 reject。
+2. 在你的路由之后，通过 `cyrenex/static` 托管前端产物并提供 SPA 回退。目录为工作目录下的 `dist/client` 或 `dist`，都不存在时跳过；可用 `static: { assets }` 指定，或用 `static: false` 只提供 API。
+3. 监听 `PORT`（默认 `3000`）与 `HOST`，或使用 `port`、`hostname` 配置。
+4. 收到 `SIGINT` / `SIGTERM` 时停止应用（执行 `onStop` 钩子、释放 Pond）后退出。传入 `signals: false` 可自行处理信号。
+
+它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。Bun 会自动读取 `.env` 文件；Node.js 请使用 `node --env-file-if-exists=.env server/main.ts`。
 
 ### 静态资源
 

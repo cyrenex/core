@@ -15,13 +15,14 @@
 > [!NOTE]
 > One `vp dev` serves your frontend and your Elysia API from the same origin. The API runs in its own Bun or Node.js process, restarts on change, and disposes every resource on the way out.
 
-Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with six entries:
+Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with seven entries:
 
 | Entry             | Where            | What                                                                         |
 | ----------------- | ---------------- | ---------------------------------------------------------------------------- |
 | `cyrenex`         | server           | `pondi`, `inject`, `RequestContext`, `warmup`, and all of pondi              |
 | `cyrenex/node`    | server (Node.js) | `@elysia/node` adapter with a working `app.stop()`                           |
 | `cyrenex/static`  | server (prod)    | `@elysia/static` with Vite defaults and SPA fallback                         |
+| `cyrenex/serve`   | server (prod)    | `serve(app)`: warm-up, static files, listen, graceful shutdown               |
 | `cyrenex/testing` | tests            | `override(app, ...)` swaps providers of an exported app                      |
 | `cyrenex/vite`    | `vite.config.ts` | Runs the app in a child process, forwards `/api` and `/ws`, generates types  |
 | `cyrenex/client`  | browser          | `type App`, so `treaty<App>()` never needs a `../server/app` relative import |
@@ -320,24 +321,14 @@ vp dev --mode node  # Node.js
 
 ## Production
 
-`vp build` builds the frontend. The server entry is yours, written with plain Elysia:
+`vp build` builds the frontend. The server entry is a few lines with `cyrenex/serve`:
 
 ```ts
 // server/main.ts
-import { fileURLToPath } from "node:url";
-import { warmup } from "cyrenex";
-import { staticPlugin } from "cyrenex/static";
+import { serve } from "cyrenex/serve";
 import app from "./app.ts";
 
-await warmup(app); // create `eager` singletons; a failure aborts startup
-
-app
-  .use(await staticPlugin({ assets: fileURLToPath(new URL("../dist", import.meta.url)) }))
-  .listen(Number(process.env.PORT ?? 3000));
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => void app.stop().finally(() => process.exit(0)));
-}
+await serve(app);
 ```
 
 ```bash
@@ -345,7 +336,14 @@ bun server/main.ts
 node server/main.ts
 ```
 
-`app.stop()` runs the `onStop` hooks and disposes the Pond; on Node.js this needs the `cyrenex/node` adapter.
+`serve(app, options?)` does what every production entry needs, in order:
+
+1. Creates the `eager` singletons (`warmup(app)`); a failure rejects before anything listens.
+2. Serves the client build through `cyrenex/static` with SPA fallback, after your routes. The directory is `dist/client` or `dist` under the working directory, skipped if neither exists; pass `static: { assets }` to choose, or `static: false` for an API only server.
+3. Listens on `PORT` (default `3000`) and `HOST`, or the `port` and `hostname` options.
+4. On `SIGINT` / `SIGTERM`, stops the app (`onStop` hooks, Pond disposal), then exits. Pass `signals: false` to handle them yourself.
+
+It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself. Bun reads `.env` files on its own; on Node.js run `node --env-file-if-exists=.env server/main.ts`.
 
 ### Static files
 

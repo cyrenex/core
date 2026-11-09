@@ -43,6 +43,10 @@
       "cyrenex-source": "./src/static.ts",
       "default": "./dist/static.mjs"
     },
+    "./serve": {
+      "cyrenex-source": "./src/serve.ts",
+      "default": "./dist/serve.mjs"
+    },
     "./testing": {
       "cyrenex-source": "./src/testing.ts",
       "default": "./dist/testing.mjs"
