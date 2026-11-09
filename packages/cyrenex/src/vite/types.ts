@@ -1,3 +1,11 @@
+/** HMR event sent to pages after the app restarted. */
+export const RESTART_EVENT = "cyrenex:restart";
+
+/** Payload of {@link RESTART_EVENT}. */
+export interface RestartEvent {
+  runtime: Runtime;
+}
+
 /** Runtime executable used to launch the isolated application process. */
 export type Runtime = "node" | "bun";
 

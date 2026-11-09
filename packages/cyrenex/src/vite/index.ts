@@ -7,7 +7,7 @@ import type { Plugin } from "vite";
 import { ElysiaEnvironment } from "./environment.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
-export type { CyrenexOptions, Runtime } from "./types.ts";
+export type { CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
 
 const ENVIRONMENT = "elysia";
 
@@ -41,6 +41,13 @@ export function renderDts(dtsFile: string, entryFile: string): string {
 declare module "cyrenex/client" {
   interface Register {
     app: typeof import("${specifier}").default;
+  }
+}
+
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
   }
 }
 

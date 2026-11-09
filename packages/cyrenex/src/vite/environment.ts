@@ -11,7 +11,8 @@ import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
 import { RuntimeProcessRunner } from "./process.ts";
 import type { ProcessOptions } from "./process.ts";
-import type { ResolvedOptions } from "./types.ts";
+import { RESTART_EVENT } from "./types.ts";
+import type { ResolvedOptions, RestartEvent } from "./types.ts";
 
 /** Owns request forwarding and process replacement for the Elysia app. */
 export class ElysiaEnvironment extends DevEnvironment {
@@ -216,6 +217,10 @@ export class ElysiaEnvironment extends DevEnvironment {
           // Dismiss the overlay; the page reloads against the working app.
           this.failure = undefined;
           this.client?.send({ type: "full-reload", path: "*" });
+        } else if (!initial) {
+          // Let pages refetch or reconnect: `import.meta.hot.on("cyrenex:restart", …)`.
+          const data: RestartEvent = { runtime: this.process.runtime };
+          this.client?.send(RESTART_EVENT, data);
         }
       } catch (error) {
         await this.currentRunner?.close();

@@ -78,7 +78,8 @@ async function until<T>(probe: () => Promise<T>, accept: (value: T) => boolean):
 async function hmr(fixture: Fixture) {
   const token = fixture.server.config.webSocketToken;
   const ws = new WebSocket(`${fixture.url.replace("http", "ws")}/?token=${token}`, "vite-hmr");
-  const messages: { type: string; event?: string; err?: { message: string } }[] = [];
+  const messages: { type: string; event?: string; data?: unknown; err?: { message: string } }[] =
+    [];
   ws.onmessage = (event) => messages.push(JSON.parse(String(event.data)));
   await new Promise((resolve, reject) => {
     ws.onopen = resolve;
@@ -175,6 +176,15 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
       (body) => body.message === "two",
     );
     expect(readFileSync(marker, "utf8")).toBe("stopped");
+  });
+
+  test("tells pages about restarts", async () => {
+    const fixture = await start({ "server/app.ts": app("one") });
+    const page = await hmr(fixture);
+    fixture.write("server/app.ts", app("two"));
+    const event = await until(async () => page.messages.find((m) => m.type === "custom"), Boolean);
+    expect(event).toEqual({ type: "custom", event: "cyrenex:restart", data: { runtime: "node" } });
+    page.close();
   });
 
   test("shows startup failures in Vite's error overlay", async () => {

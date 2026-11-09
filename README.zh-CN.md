@@ -205,6 +205,13 @@ declare module "cyrenex/client" {
   }
 }
 
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
+  }
+}
+
 export {};
 ```
 
@@ -272,6 +279,12 @@ cyrenex({
 - 旧进程收到关闭消息后执行 `app.stop()`（触发 `onStop` 与 `pond.dispose()`），超过 `shutdownTimeout`（默认 1 秒）会被强制结束。
 - 应用不可用时 HTTP 返回 `503`，转发异常返回 `502`。
 - 重启会断开业务 WebSocket，客户端需在 `close` 时自行重连；Vite 的 HMR 连接不受影响。
+- 每次重启后，页面会收到 `cyrenex:restart` HMR 事件，类型由 `cyrenex-env.d.ts` 提供：
+
+  ```ts
+  import.meta.hot?.on("cyrenex:restart", ({ runtime }) => refetch());
+  ```
+
 - 启动失败后，修正文件即可再次启动。错误同时会显示在 Vite 的错误浮层中，之后打开的页面也会显示；应用启动成功后浮层关闭，页面自动刷新。
 
 想在命令行切换运行时，可以把 Vite mode 映射过去：
