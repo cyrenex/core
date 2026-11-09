@@ -349,7 +349,7 @@ node server/main.ts
 3. Listens on `PORT` (default `3000`) and `HOST`, or the `port` and `hostname` options.
 4. On `SIGINT` / `SIGTERM`, stops the app (`onStop` hooks, Pond disposal), then exits. Pass `signals: false` to handle them yourself.
 
-It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself.
+It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself. On Bun, `app.stop()` calls async `onStop` hooks without awaiting them, so the Pond may still be disposing when it resolves; `stop()` from `serve` (and the dev server) awaits them before resolving.
 
 ### Server build
 

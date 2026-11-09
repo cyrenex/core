@@ -349,7 +349,7 @@ node server/main.ts
 3. 监听 `PORT`（默认 `3000`）与 `HOST`，或使用 `port`、`hostname` 配置。
 4. 收到 `SIGINT` / `SIGTERM` 时停止应用（执行 `onStop` 钩子、释放 Pond）后退出。传入 `signals: false` 可自行处理信号。
 
-它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。
+它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。在 Bun 上，`app.stop()` 调用异步 `onStop` 钩子时不会等待它们完成，返回时 Pond 可能仍在释放；`serve` 返回的 `stop()`（以及开发服务器）会等待钩子完成后再返回。
 
 ### 服务端构建
 

@@ -1,9 +1,11 @@
-// Bun's own adapter (Bun.serve): WebSocket scopes, as server.test.ts checks for Node.js.
+// Bun's own adapter (Bun.serve): stop/dispose and WebSocket scopes, as server.test.ts checks
+// for Node.js.
 import { afterEach, describe, expect, test } from "bun:test";
 import { Elysia } from "elysia";
 import type { AnyElysia } from "elysia";
 
 import { inject, Pond, pondi, ripple } from "../../src/index.ts";
+import { stopApp } from "../../src/stop.ts";
 
 const running: AnyElysia[] = [];
 
@@ -18,6 +20,30 @@ function listen(app: AnyElysia): number {
 }
 
 const settle = (ms = 50) => new Promise((resolve) => setTimeout(resolve, ms));
+
+describe("stopApp", () => {
+  test("resolves after async onStop hooks, so the process can exit right after", async () => {
+    const log: string[] = [];
+    const Db = ripple("db", () => ({
+      async [Symbol.asyncDispose]() {
+        await settle(10);
+        log.push("db:close");
+      },
+    }));
+    const app = new Elysia()
+      .use(pondi(new Pond()))
+      .use(inject({ db: Db }))
+      .get("/", () => "ok");
+
+    const port = listen(app);
+    expect(await fetch(`http://127.0.0.1:${port}/`).then((r) => r.text())).toBe("ok");
+
+    // Bun's own app.stop() calls the hooks without awaiting them.
+    await stopApp(app, undefined);
+    expect(log).toEqual(["db:close"]);
+    expect(app.server).toBeNull();
+  });
+});
 
 describe("WebSocket scopes", () => {
   function setup() {
