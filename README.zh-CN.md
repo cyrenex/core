@@ -15,15 +15,16 @@
 > [!NOTE]
 > 一条 `vp dev`，前端和 Elysia API 同源访问。API 跑在独立的 Bun 或 Node.js 进程里，文件变更即重启，退出前释放所有资源。
 
-搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、五个入口：
+搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、六个入口：
 
-| 入口             | 在哪里用          | 内容                                                                 |
-| ---------------- | ----------------- | -------------------------------------------------------------------- |
-| `cyrenex`        | 服务端            | `pondi`、`inject`、`RequestContext`、`warmup`，以及 pondi 的全部 API |
-| `cyrenex/node`   | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter                  |
-| `cyrenex/static` | 服务端（生产）    | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                         |
-| `cyrenex/vite`   | `vite.config.ts`  | 在子进程中运行应用，转发 `/api` 与 `/ws`，生成类型声明               |
-| `cyrenex/client` | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的相对路径  |
+| 入口              | 在哪里用          | 内容                                                                 |
+| ----------------- | ----------------- | -------------------------------------------------------------------- |
+| `cyrenex`         | 服务端            | `pondi`、`inject`、`RequestContext`、`warmup`，以及 pondi 的全部 API |
+| `cyrenex/node`    | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter                  |
+| `cyrenex/static`  | 服务端（生产）    | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                         |
+| `cyrenex/testing` | 测试              | `override(app, ...)` 替换已导出应用的 provider                       |
+| `cyrenex/vite`    | `vite.config.ts`  | 在子进程中运行应用，转发 `/api` 与 `/ws`，生成类型声明               |
+| `cyrenex/client`  | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的相对路径  |
 
 ## 特性
 
@@ -222,17 +223,32 @@ export {};
 
 ## 测试
 
-传入 fork 出的 Pond 来替换实现，再通过 Eden 直接调用应用，不经过网络：
+直接测试模块导出的应用，通过 Eden 调用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放：
 
 ```ts
 import { treaty } from "@elysia/eden";
-import { pondi, ripple } from "cyrenex";
-import { Elysia } from "elysia";
+import { ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+import app from "../server/app.ts";
+import { Db } from "../server/services.ts";
 
-const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 const api = treaty(app);
 
-expect((await api.api.users.get()).data).toEqual([]);
+test("lists users", async () => {
+  await using _ = override(
+    app,
+    ripple(Db, () => fakeDb),
+  );
+  expect((await api.api.users.get()).data).toEqual([]);
+});
+```
+
+请求会从应用 Pond 的一个 fork 中解析，这个 fork 遮蔽了传入的 ripple：依赖它们的单例（依赖 `Db` 的 `UserService`）会在 fork 中重新创建，真实实例不受影响，恢复时 fork 会被释放。override 可以嵌套，按相反顺序恢复。它作用于该应用的所有请求，所以不要并发运行同一个应用的 override 测试。
+
+只想单独测试某个路由模块时，可以用 fork 出的 Pond 搭一个小应用：
+
+```ts
+const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 ```
 
 ## Vite 插件

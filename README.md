@@ -15,15 +15,16 @@
 > [!NOTE]
 > One `vp dev` serves your frontend and your Elysia API from the same origin. The API runs in its own Bun or Node.js process, restarts on change, and disposes every resource on the way out.
 
-Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with five entries:
+Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with six entries:
 
-| Entry            | Where            | What                                                                         |
-| ---------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `cyrenex`        | server           | `pondi`, `inject`, `RequestContext`, `warmup`, and all of pondi              |
-| `cyrenex/node`   | server (Node.js) | `@elysia/node` adapter with a working `app.stop()`                           |
-| `cyrenex/static` | server (prod)    | `@elysia/static` with Vite defaults and SPA fallback                         |
-| `cyrenex/vite`   | `vite.config.ts` | Runs the app in a child process, forwards `/api` and `/ws`, generates types  |
-| `cyrenex/client` | browser          | `type App`, so `treaty<App>()` never needs a `../server/app` relative import |
+| Entry             | Where            | What                                                                         |
+| ----------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `cyrenex`         | server           | `pondi`, `inject`, `RequestContext`, `warmup`, and all of pondi              |
+| `cyrenex/node`    | server (Node.js) | `@elysia/node` adapter with a working `app.stop()`                           |
+| `cyrenex/static`  | server (prod)    | `@elysia/static` with Vite defaults and SPA fallback                         |
+| `cyrenex/testing` | tests            | `override(app, ...)` swaps providers of an exported app                      |
+| `cyrenex/vite`    | `vite.config.ts` | Runs the app in a child process, forwards `/api` and `/ws`, generates types  |
+| `cyrenex/client`  | browser          | `type App`, so `treaty<App>()` never needs a `../server/app` relative import |
 
 ## What's Special
 
@@ -222,17 +223,32 @@ Commit it and include it in your `tsconfig.json`, so a fresh clone type-checks b
 
 ## Testing
 
-Pass a forked Pond to swap implementations, and call the app through Eden without a network:
+Test the app your module exports, through Eden and without a network. `override` from `cyrenex/testing` swaps providers until it is disposed:
 
 ```ts
 import { treaty } from "@elysia/eden";
-import { pondi, ripple } from "cyrenex";
-import { Elysia } from "elysia";
+import { ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+import app from "../server/app.ts";
+import { Db } from "../server/services.ts";
 
-const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 const api = treaty(app);
 
-expect((await api.api.users.get()).data).toEqual([]);
+test("lists users", async () => {
+  await using _ = override(
+    app,
+    ripple(Db, () => fakeDb),
+  );
+  expect((await api.api.users.get()).data).toEqual([]);
+});
+```
+
+Requests resolve from a fork of the app's Pond that shadows the given ripples: singletons depending on them (`UserService` on `Db`) are created again in the fork, the real ones are left alone, and the fork is disposed on restore. Overrides nest and are restored in reverse order. They apply to every request of that app, so don't run overriding tests of one app concurrently.
+
+To test a route module on its own, build a small app with a forked Pond instead:
+
+```ts
+const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 ```
 
 ## Vite Plugin

@@ -6,6 +6,18 @@ import type { AnyElysia, Context } from "elysia";
 import { WARMUP } from "./warmup.ts";
 
 /**
+ * Where `pondi()` stores the app's {@link PondHandle}. A registered symbol, so `cyrenex/testing`
+ * finds it even when it loads a different copy of cyrenex.
+ */
+export const POND: unique symbol = Symbol.for("cyrenex.pond") as never;
+
+/** The Pond attached by `pondi()`, and the fork requests use instead while overridden. */
+export interface PondHandle {
+  readonly root: Pond;
+  override: Pond | undefined;
+}
+
+/**
  * The current Elysia request context, available to `scoped` ripples:
  *
  * ```ts
@@ -146,7 +158,9 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
   return (app: AnyElysia): PondiPlugin => {
     const webSocketPaths = new Set<string>();
     let seenRoutes = -1;
+    const handle: PondHandle = { root: pond, override: undefined };
     Object.defineProperty(app, WARMUP, { value: warm, configurable: true });
+    Object.defineProperty(app, POND, { value: handle, configurable: true });
 
     return app
       .decorate("pond", pond)
@@ -154,7 +168,9 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
         // Fallback for apps that call .listen() themselves; it cannot be awaited here.
         if (!warming) warm().catch((error: unknown) => console.error(error));
       })
-      .onRequest(() => {
+      .onRequest((ctx) => {
+        // `cyrenex/testing`: requests see the overriding fork while one is active.
+        if (handle.override) (ctx as { pond?: Pond }).pond = handle.override;
         // Routes are final by the time requests arrive; re-scan only if more were added.
         if (app.routes.length === seenRoutes) return;
         seenRoutes = app.routes.length;
