@@ -29,17 +29,19 @@ jobs:
       # Build here, not in a publish lifecycle script, so failures show their output.
       - run: vp run -r build
       - id: changesets
-        uses: changesets/action@v1
+        # v2 is required for Changesets CLI v3 (new .changeset/pre layout).
+        uses: changesets/action@v2
         with:
-          version: vp run version # format the generated CHANGELOG.md
-          publish: vp run release
-          title: "chore(release): version packages"
-          commit: "chore(release): version packages"
-          createGithubReleases: true # tag and release on GitHub after npm publish
+          version-script: vp run version # format the generated CHANGELOG.md
+          publish-script: vp run release
+          pr-title: "chore(release): version packages"
+          commit-message: "chore(release): version packages"
+          create-github-releases: true # tag and release on GitHub after npm publish
         env:
+          # @changesets/changelog-github reads it in the version script.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # changesets/action only accepts a static title, so add the version afterwards.
-      - if: steps.changesets.outputs.pullRequestNumber
+      - if: steps.changesets.outputs.pr-number
         run: |
           git fetch origin changeset-release/master
           pkg=$(git show origin/changeset-release/master:packages/cyrenex/package.json)
@@ -48,4 +50,4 @@ jobs:
           gh pr edit "$PR" --title "chore(release): $name@$version"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR: ${{ steps.changesets.outputs.pullRequestNumber }}
+          PR: ${{ steps.changesets.outputs.pr-number }}
