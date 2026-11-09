@@ -368,6 +368,10 @@ node server/main.ts
 
 只有在你没有设置前端 `outDir` 时，前端才会改为输出到 `dist/client`；如果服务端输出会落在前端输出目录内（从而被当作静态文件公开），构建会失败。`build: false` 只构建前端。构建使用所配置 `runtime` 的导出条件；服务端相关的 Vite 配置写在 `environments.elysia` 下。
 
+### 预览
+
+`vp preview` 会用所配置的运行时启动构建好的 `dist/server/main.mjs`，并把所有请求和 WebSocket 转发给它。前端产物由服务端自己托管，所以预览看到的就是部署后的样子：相同的路由、相同的静态文件、相同的 SPA 回退。它会从预览服务器获得 `PORT` 与 `HOST`，`serve()` 会读取这两个变量。没有服务端构建时，预览只提供前端并给出提示。
+
 ### 静态资源
 
 `cyrenex/static` 为 Vite 产物包装了 `@elysia/static`（需自行安装）。它接受上游的全部配置，并提供适合 Vite 的默认值和 SPA 回退：

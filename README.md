@@ -368,6 +368,10 @@ From source, Bun reads `.env` files on its own; on Node.js run `node --env-file-
 
 The client moves to `dist/client` only when you have not set its `outDir`; if the server output would land inside the client output (and be served as static files), the build fails. `build: false` builds the client only. The build uses the export conditions of the configured `runtime`; Vite settings for the server go under `environments.elysia`.
 
+### Preview
+
+`vp preview` runs the built `dist/server/main.mjs` with the configured runtime and forwards every request and WebSocket to it. The server hosts the client build itself, so the preview is what a deployment serves: same routes, same static files, same SPA fallback. It gets `PORT` and `HOST` from the preview server; `serve()` reads both. Without a server build, the preview serves the client only and says so.
+
 ### Static files
 
 `cyrenex/static` wraps `@elysia/static` (install it yourself) for a Vite build. It takes every upstream option, with Vite-friendly defaults and an SPA fallback:

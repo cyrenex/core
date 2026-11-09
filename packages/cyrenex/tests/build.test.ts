@@ -4,7 +4,8 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { createBuilder } from "vite";
+import { createBuilder, preview } from "vite";
+import type { PreviewServer } from "vite";
 import type { UserConfig } from "vite";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
@@ -23,7 +24,8 @@ import { Elysia } from "elysia";
 import { node } from ${source("node.ts")};
 
 export default new Elysia({ adapter: node() })
-  .get("/api/env", () => ({ greeting: process.env.GREETING, mode: process.env.NODE_ENV }));
+  .get("/api/env", () => ({ greeting: process.env.GREETING, mode: process.env.NODE_ENV }))
+  .ws("/ws", { message(ws, message) { ws.send(message); } });
 `,
   "server/main.ts": `
 import { serve } from ${source("serve.ts")};
@@ -34,8 +36,10 @@ await serve(app);
 };
 
 const children: ChildProcess[] = [];
+const previews: PreviewServer[] = [];
 
 afterEach(async () => {
+  for (const server of previews.splice(0)) await server.close();
   // The children run inside TMP; wait for them to exit before removing it.
   for (const child of children.splice(0)) {
     if (child.exitCode !== null) continue;
@@ -111,6 +115,34 @@ describe("server build", { timeout: 60_000 }, () => {
     // The client directory is found next to the server output, not from the cwd.
     const elsewhere = await run(TMP, join(root, "dist/server/main.mjs"));
     expect(await fetch(`${elsewhere}/`).then((r) => r.text())).toBe("<p>web</p>");
+  });
+
+  test("vp preview runs the built server", async () => {
+    const root = await build(files);
+    const server = await preview({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      preview: { port: 0, host: "127.0.0.1" },
+      plugins: [cyrenex({ runtime: "node" })],
+    });
+    previews.push(server);
+    const url = server.resolvedUrls!.local[0]!.replace(/\/$/, "");
+
+    // Answered by the built server (the preview inherits NODE_ENV from vitest here).
+    expect(await fetch(`${url}/api/env`).then((r) => r.json())).toHaveProperty("mode");
+    const page = await fetch(`${url}/deep/link`, { headers: { accept: "text/html" } });
+    expect(await page.text()).toBe("<p>web</p>");
+
+    const ws = new WebSocket(`${url.replace("http", "ws")}/ws`);
+    await new Promise((resolve, reject) => {
+      ws.onopen = resolve;
+      ws.onerror = reject;
+    });
+    const reply = new Promise((resolve) => (ws.onmessage = (event) => resolve(event.data)));
+    ws.send("ping");
+    expect(await reply).toBe("ping");
+    ws.close();
   });
 
   test("builds only the client without a server entry", async () => {

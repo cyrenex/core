@@ -8,7 +8,7 @@ import type { Runtime, WorkerData } from "./types.ts";
 /** Resolved executables, keyed by runtime; lookup spawns a process so do it once. */
 const executables = new Map<Runtime, string>();
 
-function executableOf(runtime: Runtime): string {
+export function executableOf(runtime: Runtime): string {
   let executable = executables.get(runtime);
   if (!executable) {
     // Ask the runtime itself: version-manager shims may spawn another process without forwarding IPC,

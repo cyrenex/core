@@ -6,6 +6,7 @@ import type { Plugin } from "vite";
 
 import { buildPlugin, serverBuildOf } from "./build.ts";
 import { ElysiaEnvironment } from "./environment.ts";
+import { previewPlugin } from "./preview.ts";
 import { ENVIRONMENT } from "./types.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
@@ -150,5 +151,6 @@ export default function cyrenex(options: CyrenexOptions = {}): Plugin[] {
     environmentPlugin(resolved),
     devPlugin(resolved),
     buildPlugin(resolved),
+    previewPlugin(resolved),
   ];
 }
