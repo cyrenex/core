@@ -96,7 +96,14 @@ function start(main: string, root: string, options: ResolvedOptions, logger: Log
   });
   // Synchronous, so it also works from an `exit` handler.
   const kill = () => child?.kill();
-  return { ready, kill };
+  /** Kill the server and wait until it has exited. */
+  const stop = async () => {
+    if (!child || child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise((resolve) => child!.once("exit", resolve));
+    child.kill();
+    await exited;
+  };
+  return { ready, kill, stop };
 }
 
 /**
@@ -121,7 +128,7 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
         return;
       }
 
-      const { ready, kill } = start(main, root, options, logger);
+      const { ready, kill, stop } = start(main, root, options, logger);
 
       // Before Vite's static middlewares; if the server failed to start, they serve the client.
       server.middlewares.use((req, res, next) => {
@@ -137,6 +144,12 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
         );
       });
 
+      // close() resolves once the server process is gone, not just signalled.
+      const close = server.close.bind(server);
+      server.close = async () => {
+        await Promise.all([close(), stop()]);
+        process.off("exit", kill);
+      };
       server.httpServer.once("close", kill);
       process.once("exit", kill);
     },
