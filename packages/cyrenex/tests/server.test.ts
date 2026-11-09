@@ -1,6 +1,6 @@
 // Real listeners on Node.js through `cyrenex/node`: stop/dispose and WebSocket scopes.
 import { node as elysiaNode } from "@elysia/node";
-import { Elysia } from "elysia";
+import { Elysia, file } from "elysia";
 import type { AnyElysia } from "elysia";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
@@ -55,6 +55,25 @@ describe("cyrenex/node", () => {
     running.length = 0;
     expect(app.server).toBeNull();
     expect(log).toEqual(["db:close"]);
+  });
+
+  test("sends files with a valid length header", async () => {
+    // Upstream sends both content-length and transfer-encoding, which strict clients reject.
+    const app = new Elysia({ adapter: node() }).get("/file", () => file(import.meta.filename));
+    const { port } = await listen(app);
+    const response = await fetch(`http://127.0.0.1:${port}/file`);
+    expect(response.headers.get("transfer-encoding")).toBeNull();
+    expect(await response.text()).toContain("sends files with a valid length header");
+  });
+
+  test("still streams responses of unknown length", async () => {
+    const app = new Elysia({ adapter: node() }).get("/stream", async function* () {
+      yield "a";
+      await settle(10);
+      yield "b";
+    });
+    const { port } = await listen(app);
+    expect(await fetch(`http://127.0.0.1:${port}/stream`).then((r) => r.text())).toBe("ab");
   });
 
   test("stopApp falls back for plain @elysia/node", async () => {
