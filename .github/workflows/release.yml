@@ -21,7 +21,7 @@ jobs:
           node-version: "24"
           cache: true
       - run: vp check
-      - run: vp run -r test
+      - run: vp test
       # Build here, not in a publish lifecycle script, so failures show their output.
       - run: vp run -r build
       - id: changesets

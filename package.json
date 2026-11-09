@@ -8,11 +8,11 @@
   },
   "type": "module",
   "scripts": {
-    "ready": "vp check && vp run -r test && vp run -r build",
+    "ready": "vp check && vp test && vp run -r build",
     "build": "vp run cyrenex#build",
     "dev": "vp run cyrenex#build && vp run playground#dev",
     "dev:node": "vp run cyrenex#build && vp run playground#dev:node",
-    "test": "vp run cyrenex#test",
+    "test": "vp test",
     "changeset": "changeset",
     "version": "changeset version && vp fmt",
     "release": "changeset publish"
