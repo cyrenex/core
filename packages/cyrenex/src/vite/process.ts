@@ -27,6 +27,13 @@ function executableOf(runtime: Runtime): string {
   return executable;
 }
 
+/** How to launch the child process. */
+export interface ProcessOptions {
+  runtime: Runtime;
+  /** Variables added to the host environment, e.g. from `.env` files. */
+  env: Record<string, string>;
+}
+
 /** Runs the worker in a Node.js or Bun child process connected over IPC. */
 export class RuntimeProcessRunner extends BaseEnvRunner {
   /** The process currently owning the application's listener and IPC channel. */
@@ -35,12 +42,13 @@ export class RuntimeProcessRunner extends BaseEnvRunner {
   /** Resolves on process exit so reloads cannot leave a previous child running. */
   private exited: Promise<void> = Promise.resolve();
 
-  constructor(workerEntry: string, data: WorkerData, runtime: Runtime) {
+  constructor(workerEntry: string, data: WorkerData, options: ProcessOptions) {
     super({ name: "cyrenex", workerEntry, data: { ...data } });
+    const { runtime } = options;
 
     this._initWithVirtualData(() => {
       const child = spawn(executableOf(runtime), [workerEntry], {
-        env: this._processEnv(),
+        env: { ...this._processEnv(), ...options.env },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });
       this.child = child;

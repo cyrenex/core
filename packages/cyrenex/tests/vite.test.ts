@@ -115,6 +115,15 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
     );
   });
 
+  test("loads every .env variable into the app process", async () => {
+    const { url } = await start({
+      "server/app.ts": app("env", `.get("/api/env", () => [process.env.A, process.env.B])`),
+      ".env": "A=base\nB=base",
+      ".env.development": "B=mode",
+    });
+    expect(await json(`${url}/api/env`)).toEqual(["base", "mode"]);
+  });
+
   test("forwards WebSocket upgrades", async () => {
     const { url } = await start({ "server/app.ts": app("ws") });
     const ws = new WebSocket(`${url.replace("http", "ws")}/ws`);

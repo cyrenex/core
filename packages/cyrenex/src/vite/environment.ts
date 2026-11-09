@@ -6,11 +6,12 @@ import { fileURLToPath } from "node:url";
 import { RunnerManager } from "env-runner";
 import { createViteHotChannel } from "env-runner/vite";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import { createFilter, DevEnvironment, normalizePath } from "vite";
+import { createFilter, DevEnvironment, loadEnv, normalizePath } from "vite";
 import type { ResolvedConfig, ViteDevServer } from "vite";
 
 import { RuntimeProcessRunner } from "./process.ts";
-import type { ResolvedOptions, Runtime } from "./types.ts";
+import type { ProcessOptions } from "./process.ts";
+import type { ResolvedOptions } from "./types.ts";
 
 /** Owns request forwarding and process replacement for the Elysia app. */
 export class ElysiaEnvironment extends DevEnvironment {
@@ -21,7 +22,7 @@ export class ElysiaEnvironment extends DevEnvironment {
   private currentRunner: RuntimeProcessRunner | undefined;
 
   private readonly workerEntry: string;
-  private readonly runtime: Runtime;
+  private readonly process: ProcessOptions;
   /** Absolute application entry used by the child module runner. */
   private readonly entry: string;
   /** Matches extra watch patterns and the entry directory, excluding dependency stores. */
@@ -59,7 +60,12 @@ export class ElysiaEnvironment extends DevEnvironment {
 
     this.backend = backend;
     this.entry = entry;
-    this.runtime = options.runtime;
+    this.process = {
+      runtime: options.runtime,
+      // Every variable of `.env`, `.env.local`, `.env.[mode]`… not only `VITE_*`: the app is
+      // server code. Existing process variables win, as in Vite. Vite restarts on changes.
+      env: config.envDir === false ? {} : loadEnv(config.mode, config.envDir, ""),
+    };
     this.watching = options.watch !== false;
     this.workerEntry = fileURLToPath(
       new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url),
@@ -176,15 +182,18 @@ export class ElysiaEnvironment extends DevEnvironment {
         this.currentRunner = new RuntimeProcessRunner(
           this.workerEntry,
           { entry: this.entry, environment: this.name },
-          this.runtime,
+          this.process,
         );
         await this.backend.reload(this.currentRunner);
         await this.currentRunner.waitForReady();
 
         const entry = normalizePath(relative(this.config.root, this.entry));
-        this.logger.info(`${this.runtime} server ${initial ? "started" : "restarted"}. ${entry}`, {
-          timestamp: true,
-        });
+        this.logger.info(
+          `${this.process.runtime} server ${initial ? "started" : "restarted"}. ${entry}`,
+          {
+            timestamp: true,
+          },
+        );
       } catch (error) {
         await this.currentRunner?.close();
         this.logger.error(this.formatError(error), { timestamp: true });

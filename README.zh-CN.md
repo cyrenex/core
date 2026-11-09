@@ -250,6 +250,10 @@ cyrenex({
 
 入口所在目录和所有经 Vite 加载的模块始终会被监听。`/api` 匹配 `/api` 和 `/api/users`，不匹配 `/apix`。
 
+### 环境变量
+
+应用进程会拿到 Vite `.env` 文件（`envDir` 下的 `.env`、`.env.local`、`.env.[mode]`、`.env.[mode].local`）中的全部变量，而不只是 `VITE_*`：这是服务端代码，不会进入浏览器。与 Vite 一致，shell 中已设置的变量优先。修改 `.env` 会重启开发服务器；`envDir: false` 可关闭加载。
+
 ### 重启
 
 - 文件变更以 100ms 去抖并进入串行队列，重启期间到达的请求会等待新进程就绪。

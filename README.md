@@ -250,6 +250,10 @@ cyrenex({
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
 
+### Environment variables
+
+The app process gets every variable from Vite's `.env` files (`.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local` in `envDir`), not only `VITE_*` ones: it is server code, so nothing reaches the browser. Variables already set in the shell win, as in Vite. Editing a `.env` file restarts the dev server; `envDir: false` disables loading.
+
 ### Restarts
 
 - File changes are debounced by 100ms and queued; requests arriving mid-restart wait for the new process.
