@@ -77,6 +77,7 @@
     "@elysia/eden": "catalog:",
     "@elysia/node": "catalog:",
     "@elysia/static": "catalog:",
+    "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "elysia": "catalog:",
     "typescript": "catalog:",

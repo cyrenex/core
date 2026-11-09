@@ -31,11 +31,17 @@ async function dropTransferEncoding(_: Request, next: () => unknown): Promise<Re
 
 type ListenOptions = Parameters<ReturnType<ElysiaAdapter["listen"]>>[0];
 
+/** srvx's option, which Elysia's (Bun-typed) listen options do not declare. */
+interface SrvxOptions {
+  middleware?: unknown[];
+}
+
 /** `@elysia/node` passes object options through to srvx; add the middleware there. */
 function withMiddleware(options: ListenOptions): ListenOptions {
-  const object = typeof options === "object" ? options : { port: Number(options) };
-  const middleware = (object as { middleware?: unknown[] }).middleware ?? [];
-  return { ...object, middleware: [...middleware, dropTransferEncoding] } as ListenOptions;
+  const object: ListenOptions & SrvxOptions =
+    typeof options === "object" ? options : { port: Number(options) };
+  const middleware = [...(object.middleware ?? []), dropTransferEncoding];
+  return { ...object, middleware } as ListenOptions & SrvxOptions;
 }
 
 /**

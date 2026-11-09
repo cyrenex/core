@@ -1,6 +1,10 @@
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  test: {
+    // tests/bun/ uses bun:test; tests/bun.test.ts runs it in Bun.
+    include: ["tests/*.test.ts"],
+  },
   pack: {
     entry: {
       index: "src/index.ts",
