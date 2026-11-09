@@ -1,3 +1,9 @@
+/** Vite environment running (in dev) and building the server. */
+export const ENVIRONMENT = "elysia";
+
+/** Set by the built server entry to the client build directory; read by `serve()`. */
+export const CLIENT_DIR_ENV = "CYRENEX_CLIENT_DIR";
+
 /** HMR event sent to pages after the app restarted. */
 export const RESTART_EVENT = "cyrenex:restart";
 
@@ -70,6 +76,15 @@ export interface CyrenexOptions {
    * @default 1000
    */
   shutdownTimeout?: number;
+
+  /**
+   * Build the production server with `vp build`: `entry` (your `serve(app)` module, relative
+   * to Vite root) is bundled to `outDir/main.mjs`, and the client build moves to `dist/client`
+   * unless you set its `outDir`. Dependencies stay external, as in Vite's SSR builds.
+   * Enabled by default when `server/main.ts` exists; `false` builds the client only.
+   * @default { entry: "server/main.ts", outDir: "dist/server" }
+   */
+  build?: false | { entry?: string; outDir?: string };
 }
 
 export interface ResolvedOptions {
@@ -81,6 +96,8 @@ export interface ResolvedOptions {
   execArgv: string[];
   env: Record<string, string>;
   shutdownTimeout: number;
+  /** `auto`: defaulted, so skipped when the entry does not exist. */
+  build: false | { entry: string; outDir: string; auto: boolean };
 }
 
 /** Bootstrap data serialized by env-runner and delivered to the child over IPC. */

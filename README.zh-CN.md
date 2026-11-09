@@ -265,6 +265,7 @@ cyrenex({
   execArgv: [],
   env: {},
   shutdownTimeout: 1000,
+  build: { entry: "server/main.ts", outDir: "dist/server" },
 });
 ```
 
@@ -279,6 +280,7 @@ cyrenex({
 | `execArgv`        | `[]`                                   | 应用进程额外的运行时参数                                       |
 | `env`             | `{}`                                   | 应用进程的环境变量，覆盖 shell 与 `.env` 文件                  |
 | `shutdownTimeout` | `1000`                                 | 重启时等待 `app.stop()` 的毫秒数，超时强制结束旧进程           |
+| `build`           | 见[服务端构建](#服务端构建)            | 生产服务端构建；`false` 只构建前端                             |
 
 入口所在目录和所有经 Vite 加载的模块始终会被监听。`/api` 匹配 `/api` 和 `/api/users`，不匹配 `/apix`。
 
@@ -321,7 +323,7 @@ vp dev --mode node  # Node.js
 
 ## 生产环境
 
-`vp build` 构建前端，服务端入口用 `cyrenex/serve` 几行即可：
+生产入口用 `cyrenex/serve` 几行即可。可以直接从源码运行，也可以让 `vp build` 把它和前端一起打包：
 
 ```ts
 // server/main.ts
@@ -332,18 +334,39 @@ await serve(app);
 ```
 
 ```bash
-bun server/main.ts
+vp build                     # dist/client + dist/server/main.mjs
+
+node dist/server/main.mjs    # 构建产物
+bun dist/server/main.mjs
+bun server/main.ts           # 或直接运行源码，无需构建服务端
 node server/main.ts
 ```
 
 `serve(app, options?)` 依次完成生产入口都需要做的事：
 
 1. 创建 `eager` 中的 singleton（`warmup(app)`），失败则在监听之前 reject。
-2. 在你的路由之后，通过 `cyrenex/static` 托管前端产物并提供 SPA 回退。目录为工作目录下的 `dist/client` 或 `dist`，都不存在时跳过；可用 `static: { assets }` 指定，或用 `static: false` 只提供 API。
+2. 在你的路由之后，通过 `cyrenex/static` 托管前端产物并提供 SPA 回退。构建后的服务端会在自身旁边找到它；从源码运行时为工作目录下的 `dist/client` 或 `dist`，都不存在时跳过。可用 `static: { assets }` 指定，或用 `static: false` 只提供 API。
 3. 监听 `PORT`（默认 `3000`）与 `HOST`，或使用 `port`、`hostname` 配置。
 4. 收到 `SIGINT` / `SIGTERM` 时停止应用（执行 `onStop` 钩子、释放 Pond）后退出。传入 `signals: false` 可自行处理信号。
 
-它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。Bun 会自动读取 `.env` 文件；Node.js 请使用 `node --env-file-if-exists=.env server/main.ts`。
+它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。
+
+### 服务端构建
+
+存在 `server/main.ts` 时，`vp build` 会构建两个环境：前端输出到 `dist/client`，服务端输出到 `dist/server/main.mjs`。产物和源码一样从 `node_modules` 导入依赖，所以部署时带上 `package.json` 并安装生产依赖即可。在你的入口执行之前，构建后的服务端会：
+
+- 从工作目录加载 `.env.production.local`、`.env.local`、`.env.production` 与 `.env`，不覆盖已设置的变量；
+- 将 `NODE_ENV` 默认设为 `production`；
+- 让 `serve()` 指向自身旁边的前端产物，因此可以在任意工作目录运行。
+
+从源码运行时，Bun 会自动读取 `.env` 文件；Node.js 请使用 `node --env-file-if-exists=.env server/main.ts`。
+
+| `build` 配置 | 默认值             | 说明                                   |
+| ------------ | ------------------ | -------------------------------------- |
+| `entry`      | `"server/main.ts"` | 生产入口，相对 Vite root               |
+| `outDir`     | `"dist/server"`    | 服务端输出目录，不能位于前端输出目录内 |
+
+只有在你没有设置前端 `outDir` 时，前端才会改为输出到 `dist/client`；如果服务端输出会落在前端输出目录内（从而被当作静态文件公开），构建会失败。`build: false` 只构建前端。构建使用所配置 `runtime` 的导出条件；服务端相关的 Vite 配置写在 `environments.elysia` 下。
 
 ### 静态资源
 
@@ -382,7 +405,6 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 - 在 Node.js 上，Elysia 只会在使用了支持 WebSocket 的 adapter 的实例上注册 `.ws()` 路由，所以定义 `.ws()` 的插件也要传入 adapter。
 - 在 Node.js 上，带 body schema 的 WebSocket 消息可能需要显式配置 `parse`。
-- 开发插件只用于开发。除了写入 `cyrenex-env.d.ts`，`vp build` 只构建前端，服务端入口与部署由应用自行管理。
 
 ## 本地开发
 

@@ -5,13 +5,11 @@ import type { AnyElysia } from "elysia";
 import type { StaticPluginOptions } from "./static.ts";
 import { stopApp } from "./stop.ts";
 import type { StoppableServer } from "./stop.ts";
+import { CLIENT_DIR_ENV } from "./vite/types.ts";
 import { warmup } from "./warmup.ts";
 
-/** Set by the server build to the client build directory, next to the server output. */
-export const CLIENT_DIR_ENV = "CYRENEX_CLIENT_DIR";
-
 export interface ServeOptions {
-  /** @default Number(process.env.PORT) || 3000 */
+  /** `0` picks a free port. @default Number(process.env.PORT ?? 3000) */
   port?: number;
   /** @default process.env.HOST, else the adapter's default */
   hostname?: string;
@@ -79,7 +77,7 @@ export async function serve(app: AnyElysia, options: ServeOptions = {}): Promise
     }
   }
 
-  const port = options.port ?? (Number(process.env.PORT) || 3000);
+  const port = options.port ?? Number(process.env.PORT || 3000);
   const hostname = options.hostname ?? process.env.HOST;
   const server = await new Promise<ListeningServer>((resolve) =>
     app.listen({ port, ...(hostname && { hostname }) }, (value) => resolve(value as never)),

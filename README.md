@@ -265,6 +265,7 @@ cyrenex({
   execArgv: [],
   env: {},
   shutdownTimeout: 1000,
+  build: { entry: "server/main.ts", outDir: "dist/server" },
 });
 ```
 
@@ -279,6 +280,7 @@ cyrenex({
 | `execArgv`        | `[]`                                   | Extra runtime flags for the app process                                           |
 | `env`             | `{}`                                   | Variables for the app process, over the shell and `.env` files                    |
 | `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process      |
+| `build`           | see [Server build](#server-build)      | Production server build; `false` builds the client only                           |
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
 
@@ -321,7 +323,7 @@ vp dev --mode node  # Node.js
 
 ## Production
 
-`vp build` builds the frontend. The server entry is a few lines with `cyrenex/serve`:
+The production entry is a few lines with `cyrenex/serve`. Run it from source, or let `vp build` bundle it next to the frontend:
 
 ```ts
 // server/main.ts
@@ -332,18 +334,39 @@ await serve(app);
 ```
 
 ```bash
-bun server/main.ts
+vp build                     # dist/client + dist/server/main.mjs
+
+node dist/server/main.mjs    # built
+bun dist/server/main.mjs
+bun server/main.ts           # or straight from source, no server build needed
 node server/main.ts
 ```
 
 `serve(app, options?)` does what every production entry needs, in order:
 
 1. Creates the `eager` singletons (`warmup(app)`); a failure rejects before anything listens.
-2. Serves the client build through `cyrenex/static` with SPA fallback, after your routes. The directory is `dist/client` or `dist` under the working directory, skipped if neither exists; pass `static: { assets }` to choose, or `static: false` for an API only server.
+2. Serves the client build through `cyrenex/static` with SPA fallback, after your routes. A built server finds it next to itself; from source it is `dist/client` or `dist` under the working directory, skipped if neither exists. Pass `static: { assets }` to choose, or `static: false` for an API only server.
 3. Listens on `PORT` (default `3000`) and `HOST`, or the `port` and `hostname` options.
 4. On `SIGINT` / `SIGTERM`, stops the app (`onStop` hooks, Pond disposal), then exits. Pass `signals: false` to handle them yourself.
 
-It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself. Bun reads `.env` files on its own; on Node.js run `node --env-file-if-exists=.env server/main.ts`.
+It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself.
+
+### Server build
+
+When `server/main.ts` exists, `vp build` builds both environments: the client to `dist/client`, the server to `dist/server/main.mjs`. The output imports its dependencies from `node_modules`, like the source does, so deploy it with your `package.json` and install production dependencies. Before your entry runs, the built server:
+
+- loads `.env.production.local`, `.env.local`, `.env.production` and `.env` from the working directory, without overriding variables already set,
+- defaults `NODE_ENV` to `production`,
+- points `serve()` at the client build next to it, so it runs from any working directory.
+
+From source, Bun reads `.env` files on its own; on Node.js run `node --env-file-if-exists=.env server/main.ts`.
+
+| `build` option | Default            | Description                                         |
+| -------------- | ------------------ | --------------------------------------------------- |
+| `entry`        | `"server/main.ts"` | Production entry, relative to Vite root             |
+| `outDir`       | `"dist/server"`    | Server output; must not be inside the client output |
+
+The client moves to `dist/client` only when you have not set its `outDir`; if the server output would land inside the client output (and be served as static files), the build fails. `build: false` builds the client only. The build uses the export conditions of the configured `runtime`; Vite settings for the server go under `environments.elysia`.
 
 ### Static files
 
@@ -382,7 +405,6 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 - On Node.js, Elysia only registers WebSocket routes on instances created with a WebSocket-capable adapter, so pass the adapter to plugins that define `.ws()` routes too.
 - On Node.js, WebSocket messages with a body schema may need an explicit `parse`.
-- The dev plugin is development only. Apart from writing `cyrenex-env.d.ts`, `vp build` builds just the frontend; the server entry and deployment are yours.
 
 ## Development
 

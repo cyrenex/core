@@ -11,7 +11,7 @@ import cyrenex from "../src/vite/index.ts";
 import type { CyrenexOptions } from "../src/vite/index.ts";
 
 // Inside the package, so the fixture resolves elysia from its node_modules.
-const TMP = join(import.meta.dirname, "../.tmp");
+const TMP = join(import.meta.dirname, "../.tmp/vite");
 
 const app = (message: string, extra = "") => `
 import { Elysia } from "elysia";
