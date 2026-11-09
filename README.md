@@ -272,7 +272,7 @@ The app process gets every variable from Vite's `.env` files (`.env`, `.env.loca
 - The old process gets a shutdown message, runs `app.stop()` (so `onStop` and `pond.dispose()` run), and is killed after `shutdownTimeout` (1 second by default).
 - If the app is unavailable, HTTP returns `503`; forwarding errors return `502`.
 - Business WebSockets are closed on restart. Reconnect on `close` in the client; Vite's HMR socket is untouched.
-- After a startup error, fix the file and it starts again.
+- After a startup error, fix the file and it starts again. The error also shows in Vite's error overlay, including on pages opened later; once the app starts, the overlay is dismissed and the page reloads.
 
 To pick the runtime from the command line, map a Vite mode to it:
 

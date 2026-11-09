@@ -74,6 +74,19 @@ async function until<T>(probe: () => Promise<T>, accept: (value: T) => boolean):
   }
 }
 
+/** A browser's HMR connection: collects what Vite sends to the page. */
+async function hmr(fixture: Fixture) {
+  const token = fixture.server.config.webSocketToken;
+  const ws = new WebSocket(`${fixture.url.replace("http", "ws")}/?token=${token}`, "vite-hmr");
+  const messages: { type: string; event?: string; err?: { message: string } }[] = [];
+  ws.onmessage = (event) => messages.push(JSON.parse(String(event.data)));
+  await new Promise((resolve, reject) => {
+    ws.onopen = resolve;
+    ws.onerror = reject;
+  });
+  return { messages, close: () => ws.close() };
+}
+
 const json = (url: string) => fetch(url).then((r) => r.json() as Promise<Record<string, unknown>>);
 
 describe("cyrenex/vite", { timeout: 30_000 }, () => {
@@ -162,6 +175,24 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
       (body) => body.message === "two",
     );
     expect(readFileSync(marker, "utf8")).toBe("stopped");
+  });
+
+  test("shows startup failures in Vite's error overlay", async () => {
+    const fixture = await start({ "server/app.ts": app("ok") });
+    const page = await hmr(fixture);
+
+    fixture.write("server/app.ts", `throw new Error("broken app");`);
+    const error = await until(async () => page.messages.find((m) => m.type === "error"), Boolean);
+    expect(error?.err?.message).toBe("Error: broken app");
+
+    // A page opened while the app is broken gets the overlay too.
+    const late = await hmr(fixture);
+    await until(async () => late.messages.find((m) => m.type === "error"), Boolean);
+
+    fixture.write("server/app.ts", app("fixed"));
+    await until(async () => page.messages.find((m) => m.type === "full-reload"), Boolean);
+    page.close();
+    late.close();
   });
 
   test("forwards WebSocket upgrades", async () => {

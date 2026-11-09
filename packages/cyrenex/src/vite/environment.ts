@@ -7,7 +7,7 @@ import { RunnerManager } from "env-runner";
 import { createViteHotChannel } from "env-runner/vite";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { createFilter, DevEnvironment, loadEnv, normalizePath } from "vite";
-import type { ResolvedConfig, ViteDevServer } from "vite";
+import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
 import { RuntimeProcessRunner } from "./process.ts";
 import type { ProcessOptions } from "./process.ts";
@@ -41,6 +41,10 @@ export class ElysiaEnvironment extends DevEnvironment {
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
   private cleanup: (() => void) | undefined;
+  /** The browser's HMR channel, used to show startup failures in Vite's error overlay. */
+  private client: ViteDevServer["ws"] | undefined;
+  /** The last startup failure, shown to browsers until a restart succeeds. */
+  private failure: ErrorPayload["err"] | undefined;
 
   constructor(name: string, config: ResolvedConfig, options: ResolvedOptions) {
     const entry = normalizePath(resolve(config.root, options.entry));
@@ -162,9 +166,17 @@ export class ElysiaEnvironment extends DevEnvironment {
     }
     server.httpServer?.on("upgrade", upgrade);
 
+    // Pages opened after a failed start still get the overlay.
+    this.client = server.ws;
+    const onConnection = (): void => {
+      if (this.failure) server.ws.send({ type: "error", err: this.failure });
+    };
+    server.ws.on("connection", onConnection);
+
     this.cleanup = () => {
       server.watcher.off("all", onFile);
       server.httpServer?.off("upgrade", upgrade);
+      server.ws.off("connection", onConnection);
     };
 
     this.restart(true);
@@ -200,11 +212,31 @@ export class ElysiaEnvironment extends DevEnvironment {
             timestamp: true,
           },
         );
+        if (this.failure) {
+          // Dismiss the overlay; the page reloads against the working app.
+          this.failure = undefined;
+          this.client?.send({ type: "full-reload", path: "*" });
+        }
       } catch (error) {
         await this.currentRunner?.close();
-        this.logger.error(this.formatError(error), { timestamp: true });
+        const message = this.formatError(error);
+        this.logger.error(message, { timestamp: true });
+        this.fail(message);
       }
     });
+  }
+
+  /** Show a startup failure in Vite's error overlay. */
+  private fail(text: string): void {
+    // Worker failures arrive as a stack: the first line is the message.
+    const [message = text, ...stack] = text.split("\n");
+    this.failure = {
+      message,
+      stack: stack.join("\n"),
+      id: normalizePath(relative(this.config.root, this.entry)),
+      plugin: "cyrenex",
+    };
+    this.client?.send({ type: "error", err: this.failure });
   }
 
   private formatError(error: unknown): string {
