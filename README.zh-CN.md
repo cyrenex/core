@@ -224,7 +224,7 @@ export {};
 
 ## 测试
 
-直接测试模块导出的应用，通过 Eden 调用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放：
+直接测试模块导出的应用，通过 Eden 调用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放，在 Vitest 与 `bun test` 中用法相同：
 
 ```ts
 import { treaty } from "@elysia/eden";

@@ -224,7 +224,7 @@ Commit it and include it in your `tsconfig.json`, so a fresh clone type-checks b
 
 ## Testing
 
-Test the app your module exports, through Eden and without a network. `override` from `cyrenex/testing` swaps providers until it is disposed:
+Test the app your module exports, through Eden and without a network. `override` from `cyrenex/testing` swaps providers until it is disposed, the same way in Vitest and `bun test`:
 
 ```ts
 import { treaty } from "@elysia/eden";
