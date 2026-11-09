@@ -152,7 +152,7 @@ Use `pondi(pond)` on the root app, before the routes. It decorates the context w
 
 ### WebSockets
 
-In a WebSocket route, injected values sit on `ws.data` and the scope lives as long as the connection: every message sees the same instances, and they are disposed after your `close` handler runs.
+In a WebSocket route, injected values sit on `ws.data` and the scope lives as long as the connection: every message sees the same instances, and they are disposed after your `close` handler runs. If the upgrade is rejected (a hook or the handler returns an error status), the scope is disposed with the response.
 
 ```ts
 const Session = ripple("session", [RequestContext], (ctx) => openSession(ctx.headers), {
@@ -335,7 +335,6 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 ## Known Limitations
 
-- If a WebSocket upgrade fails after injection, its scope is not disposed and is left to garbage collection.
 - On Node.js, Elysia only registers WebSocket routes on instances created with a WebSocket-capable adapter, so pass the adapter to plugins that define `.ws()` routes too.
 - On Node.js, WebSocket messages with a body schema may need an explicit `parse`.
 - The dev plugin is development only. Apart from writing `cyrenex-env.d.ts`, `vp build` builds just the frontend; the server entry and deployment are yours.

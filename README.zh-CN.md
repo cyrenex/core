@@ -152,7 +152,7 @@ fork 是按需创建的：没有使用 `inject` 的路由完全不会碰到容�
 
 ### WebSocket
 
-在 WebSocket 路由中，注入的值位于 `ws.data`，作用域与连接同生命周期：每条消息拿到的都是同一批实例，并在你的 `close` handler 执行后释放。
+在 WebSocket 路由中，注入的值位于 `ws.data`，作用域与连接同生命周期：每条消息拿到的都是同一批实例，并在你的 `close` handler 执行后释放。如果升级被拒绝（钩子或 handler 返回错误状态），作用域会随响应一起释放。
 
 ```ts
 const Session = ripple("session", [RequestContext], (ctx) => openSession(ctx.headers), {
@@ -335,7 +335,6 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 ## 已知限制
 
-- 如果注入之后 WebSocket upgrade 失败，对应的作用域不会被释放，只能等待垃圾回收。
 - 在 Node.js 上，Elysia 只会在使用了支持 WebSocket 的 adapter 的实例上注册 `.ws()` 路由，所以定义 `.ws()` 的插件也要传入 adapter。
 - 在 Node.js 上，带 body schema 的 WebSocket 消息可能需要显式配置 `parse`。
 - 开发插件只用于开发。除了写入 `cyrenex-env.d.ts`，`vp build` 只构建前端，服务端入口与部署由应用自行管理。

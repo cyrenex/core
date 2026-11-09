@@ -84,6 +84,11 @@ function isWebSocketUpgrade(request: Request): boolean {
   return request.headers.get("upgrade")?.toLowerCase() === "websocket";
 }
 
+/** `set.status` is a number or, when set by name, a status string such as "Unauthorized". */
+function isSuccess(status: unknown): boolean {
+  return status === undefined || (typeof status === "number" && status < 300);
+}
+
 export interface PondiOptions {
   /**
    * Include `code`, `message` and dependency `path` of a `PondError` in the 500 response.
@@ -155,9 +160,12 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
         seenRoutes = app.routes.length;
         adoptWebSockets(app, webSocketPaths);
       })
-      .onAfterResponse({ as: "global" }, async ({ request, route }) => {
-        // An upgraded connection keeps its scope until the WebSocket closes.
-        if (isWebSocketUpgrade(request) && webSocketPaths.has(route)) return;
+      .onAfterResponse({ as: "global" }, async ({ request, route, set }) => {
+        // An upgraded connection keeps its scope until the WebSocket closes; a rejected
+        // upgrade (an error status from a hook or the handler) never opens, so release now.
+        if (isWebSocketUpgrade(request) && webSocketPaths.has(route) && isSuccess(set.status)) {
+          return;
+        }
         await release(request);
       })
       .onError({ as: "global" }, ({ error, set }) => {

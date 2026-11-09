@@ -141,4 +141,33 @@ describe("WebSocket scopes", () => {
     await settle();
     expect(log).toContain("dispose 2");
   });
+
+  test("are disposed when the upgrade is rejected", async () => {
+    const log: string[] = [];
+    const Session = ripple(
+      "session",
+      () => (log.push("create"), { [Symbol.dispose]: () => log.push("dispose") }),
+      { mode: "scoped" },
+    );
+    const app = new Elysia({ adapter: node() })
+      .use(pondi(new Pond()))
+      .use(inject({ session: Session }))
+      .ws("/ws", {
+        beforeHandle: ({ status }) => status(401),
+        message() {},
+      });
+    const { port } = await listen(app);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((resolve) => {
+      ws.onerror = resolve;
+      ws.onclose = resolve;
+    });
+    await settle();
+    // @elysia/node may run the rejected upgrade through the app more than once.
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.filter((l) => l === "create").length).toBe(
+      log.filter((l) => l === "dispose").length,
+    );
+  });
 });
