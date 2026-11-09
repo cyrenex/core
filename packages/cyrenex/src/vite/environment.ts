@@ -6,11 +6,14 @@ import { fileURLToPath } from "node:url";
 import { RunnerManager } from "env-runner";
 import { createViteHotChannel } from "env-runner/vite";
 import { NodeRequest, sendNodeResponse } from "srvx/node";
-import { createFilter, DevEnvironment, normalizePath } from "vite";
-import type { ResolvedConfig, ViteDevServer } from "vite";
+import { createFilter, DevEnvironment, loadEnv, normalizePath } from "vite";
+import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
 import { RuntimeProcessRunner } from "./process.ts";
-import type { ResolvedOptions, Runtime } from "./types.ts";
+import type { ProcessOptions } from "./process.ts";
+import { matchesRoutes, normalizeRoutes, prefixesOf } from "./routes.ts";
+import { RESTART_EVENT } from "./types.ts";
+import type { ResolvedOptions, RestartEvent, WorkerReadyMessage } from "./types.ts";
 
 /** Owns request forwarding and process replacement for the Elysia app. */
 export class ElysiaEnvironment extends DevEnvironment {
@@ -21,7 +24,8 @@ export class ElysiaEnvironment extends DevEnvironment {
   private currentRunner: RuntimeProcessRunner | undefined;
 
   private readonly workerEntry: string;
-  private readonly runtime: Runtime;
+  private readonly process: ProcessOptions;
+  private readonly shutdownTimeout: number;
   /** Absolute application entry used by the child module runner. */
   private readonly entry: string;
   /** Matches extra watch patterns and the entry directory, excluding dependency stores. */
@@ -30,7 +34,11 @@ export class ElysiaEnvironment extends DevEnvironment {
   private readonly watchRoots: string[];
   private readonly watching: boolean;
   /** Normalized path prefixes; forwarding preserves the original URL. */
-  private readonly routes: string[];
+  private routes: string[];
+  /** Read the prefixes from the app on every start instead of the options. */
+  private readonly autoRoutes: boolean;
+  /** Paths `routes: "auto"` last warned about. */
+  private skipped = "";
   /** Business upgrade sockets, closed before their owning child is replaced. */
   private readonly sockets = new Set<Socket>();
   /** Serial restart queue, also awaited by incoming requests and upgrades. */
@@ -39,6 +47,10 @@ export class ElysiaEnvironment extends DevEnvironment {
   private timer: NodeJS.Timeout | undefined;
   private disposed = false;
   private cleanup: (() => void) | undefined;
+  /** The browser's HMR channel, used to show startup failures in Vite's error overlay. */
+  private client: ViteDevServer["ws"] | undefined;
+  /** The last startup failure, shown to browsers until a restart succeeds. */
+  private failure: ErrorPayload["err"] | undefined;
 
   constructor(name: string, config: ResolvedConfig, options: ResolvedOptions) {
     const entry = normalizePath(resolve(config.root, options.entry));
@@ -59,14 +71,23 @@ export class ElysiaEnvironment extends DevEnvironment {
 
     this.backend = backend;
     this.entry = entry;
-    this.runtime = options.runtime;
+    this.process = {
+      runtime: options.runtime,
+      // Every variable of `.env`, `.env.local`, `.env.[mode]`… not only `VITE_*`: the app is
+      // server code. Existing process variables win, as in Vite. Vite restarts on changes.
+      env: {
+        ...(config.envDir === false ? {} : loadEnv(config.mode, config.envDir, "")),
+        ...options.env,
+      },
+      execArgv: options.execArgv,
+    };
+    this.shutdownTimeout = options.shutdownTimeout;
     this.watching = options.watch !== false;
     this.workerEntry = fileURLToPath(
       new URL(import.meta.url.endsWith(".ts") ? "./worker.ts" : "./worker.mjs", import.meta.url),
     );
-    this.routes = options.routes.map((route) =>
-      route === "/" ? route : route.replace(/\/+$/, ""),
-    );
+    this.autoRoutes = options.routes === "auto";
+    this.routes = options.routes === "auto" ? [] : normalizeRoutes(options.routes);
 
     const patterns = [
       `${normalizePath(dirname(entry))}/**`,
@@ -82,10 +103,7 @@ export class ElysiaEnvironment extends DevEnvironment {
   }
 
   matches(url: string): boolean {
-    const pathname = new URL(url, "http://localhost").pathname;
-    return this.routes.some(
-      (route) => route === "/" || pathname === route || pathname.startsWith(`${route}/`),
-    );
+    return matchesRoutes(this.routes, new URL(url, "http://localhost").pathname);
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -150,9 +168,17 @@ export class ElysiaEnvironment extends DevEnvironment {
     }
     server.httpServer?.on("upgrade", upgrade);
 
+    // Pages opened after a failed start still get the overlay.
+    this.client = server.ws;
+    const onConnection = (): void => {
+      if (this.failure) server.ws.send({ type: "error", err: this.failure });
+    };
+    server.ws.on("connection", onConnection);
+
     this.cleanup = () => {
       server.watcher.off("all", onFile);
       server.httpServer?.off("upgrade", upgrade);
+      server.ws.off("connection", onConnection);
     };
 
     this.restart(true);
@@ -170,26 +196,77 @@ export class ElysiaEnvironment extends DevEnvironment {
 
       try {
         // Graceful shutdown runs app.stop() → onStop → pond.dispose() in the old process.
-        await this.currentRunner?.shutdown(1000);
+        await this.currentRunner?.shutdown(this.shutdownTimeout);
         if (this.disposed) return;
 
-        this.currentRunner = new RuntimeProcessRunner(
+        const runner = new RuntimeProcessRunner(
           this.workerEntry,
           { entry: this.entry, environment: this.name },
-          this.runtime,
+          this.process,
         );
+        this.currentRunner = runner;
+        if (this.autoRoutes) runner.onMessage((message) => this.adoptRoutes(message));
         await this.backend.reload(this.currentRunner);
         await this.currentRunner.waitForReady();
 
         const entry = normalizePath(relative(this.config.root, this.entry));
-        this.logger.info(`${this.runtime} server ${initial ? "started" : "restarted"}. ${entry}`, {
-          timestamp: true,
-        });
+        this.logger.info(
+          `${this.process.runtime} server ${initial ? "started" : "restarted"}. ${entry}`,
+          {
+            timestamp: true,
+          },
+        );
+        if (this.failure) {
+          // Dismiss the overlay; the page reloads against the working app.
+          this.failure = undefined;
+          this.client?.send({ type: "full-reload", path: "*" });
+        } else if (!initial) {
+          // Let pages refetch or reconnect: `import.meta.hot.on("cyrenex:restart", …)`.
+          const data: RestartEvent = { runtime: this.process.runtime };
+          this.client?.send(RESTART_EVENT, data);
+        }
       } catch (error) {
         await this.currentRunner?.close();
-        this.logger.error(this.formatError(error), { timestamp: true });
+        const message = this.formatError(error);
+        this.logger.error(message, { timestamp: true });
+        this.fail(message);
       }
     });
+  }
+
+  /** `routes: "auto"`: forward what the app that just started defines. */
+  private adoptRoutes(message: unknown): void {
+    const ready = message as Partial<WorkerReadyMessage> | undefined;
+    if (!ready?.address || !Array.isArray(ready.paths)) return;
+    const { prefixes, skipped } = prefixesOf(ready.paths);
+    if (prefixes.join() !== this.routes.join()) {
+      this.logger.info(`forwarding ${prefixes.join(", ") || "nothing"}`, { timestamp: true });
+    }
+    this.routes = prefixes;
+    // Warn once per change, not on every restart.
+    const skippedKey = skipped.join();
+    if (skippedKey === this.skipped) return;
+    this.skipped = skippedKey;
+    if (skipped.length) {
+      this.logger.warn(
+        `routes: "auto" cannot forward ${skipped.join(", ")}; they would shadow the frontend. ` +
+          "Move them under a prefix or list routes explicitly.",
+        { timestamp: true },
+      );
+    }
+  }
+
+  /** Show a startup failure in Vite's error overlay. */
+  private fail(text: string): void {
+    // Worker failures arrive as a stack: the first line is the message.
+    const [message = text, ...stack] = text.split("\n");
+    this.failure = {
+      message,
+      stack: stack.join("\n"),
+      id: normalizePath(relative(this.config.root, this.entry)),
+      plugin: "cyrenex",
+    };
+    this.client?.send({ type: "error", err: this.failure });
   }
 
   private formatError(error: unknown): string {
@@ -207,7 +284,7 @@ export class ElysiaEnvironment extends DevEnvironment {
     clearTimeout(this.timer);
     this.cleanup?.();
     for (const socket of this.sockets) socket.destroy();
-    await this.backend.shutdown(1000);
+    await this.backend.shutdown(this.shutdownTimeout);
     await this.task;
     await super.close();
   }

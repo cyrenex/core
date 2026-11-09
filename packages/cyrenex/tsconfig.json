@@ -15,5 +15,6 @@
     "verbatimModuleSyntax": true,
     "erasableSyntaxOnly": true,
     "skipLibCheck": true
-  }
+  },
+  "exclude": ["tests/bun", "dist", ".tmp"]
 }

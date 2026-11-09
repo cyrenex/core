@@ -43,6 +43,14 @@
       "cyrenex-source": "./src/static.ts",
       "default": "./dist/static.mjs"
     },
+    "./serve": {
+      "cyrenex-source": "./src/serve.ts",
+      "default": "./dist/serve.mjs"
+    },
+    "./testing": {
+      "cyrenex-source": "./src/testing.ts",
+      "default": "./dist/testing.mjs"
+    },
     "./vite": {
       "cyrenex-source": "./src/vite/index.ts",
       "default": "./dist/vite.mjs"
@@ -69,6 +77,7 @@
     "@elysia/eden": "catalog:",
     "@elysia/node": "catalog:",
     "@elysia/static": "catalog:",
+    "@types/bun": "catalog:",
     "@types/node": "catalog:",
     "elysia": "catalog:",
     "typescript": "catalog:",

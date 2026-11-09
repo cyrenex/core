@@ -6,6 +6,18 @@ import type { AnyElysia, Context } from "elysia";
 import { WARMUP } from "./warmup.ts";
 
 /**
+ * Where `pondi()` stores the app's {@link PondHandle}. A registered symbol, so `cyrenex/testing`
+ * finds it even when it loads a different copy of cyrenex.
+ */
+export const POND: unique symbol = Symbol.for("cyrenex.pond") as never;
+
+/** The Pond attached by `pondi()`, and the fork requests use instead while overridden. */
+export interface PondHandle {
+  readonly root: Pond;
+  override: Pond | undefined;
+}
+
+/**
  * The current Elysia request context, available to `scoped` ripples:
  *
  * ```ts
@@ -84,6 +96,11 @@ function isWebSocketUpgrade(request: Request): boolean {
   return request.headers.get("upgrade")?.toLowerCase() === "websocket";
 }
 
+/** `set.status` is a number or, when set by name, a status string such as "Unauthorized". */
+function isSuccess(status: unknown): boolean {
+  return status === undefined || (typeof status === "number" && status < 300);
+}
+
 export interface PondiOptions {
   /**
    * Include `code`, `message` and dependency `path` of a `PondError` in the 500 response.
@@ -141,7 +158,9 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
   return (app: AnyElysia): PondiPlugin => {
     const webSocketPaths = new Set<string>();
     let seenRoutes = -1;
+    const handle: PondHandle = { root: pond, override: undefined };
     Object.defineProperty(app, WARMUP, { value: warm, configurable: true });
+    Object.defineProperty(app, POND, { value: handle, configurable: true });
 
     return app
       .decorate("pond", pond)
@@ -149,15 +168,20 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
         // Fallback for apps that call .listen() themselves; it cannot be awaited here.
         if (!warming) warm().catch((error: unknown) => console.error(error));
       })
-      .onRequest(() => {
+      .onRequest((ctx) => {
+        // `cyrenex/testing`: requests see the overriding fork while one is active.
+        if (handle.override) (ctx as { pond?: Pond }).pond = handle.override;
         // Routes are final by the time requests arrive; re-scan only if more were added.
         if (app.routes.length === seenRoutes) return;
         seenRoutes = app.routes.length;
         adoptWebSockets(app, webSocketPaths);
       })
-      .onAfterResponse({ as: "global" }, async ({ request, route }) => {
-        // An upgraded connection keeps its scope until the WebSocket closes.
-        if (isWebSocketUpgrade(request) && webSocketPaths.has(route)) return;
+      .onAfterResponse({ as: "global" }, async ({ request, route, set }) => {
+        // An upgraded connection keeps its scope until the WebSocket closes; a rejected
+        // upgrade (an error status from a hook or the handler) never opens, so release now.
+        if (isWebSocketUpgrade(request) && webSocketPaths.has(route) && isSuccess(set.status)) {
+          return;
+        }
         await release(request);
       })
       .onError({ as: "global" }, ({ error, set }) => {

@@ -20,8 +20,12 @@ jobs:
         with:
           node-version: "24"
           cache: true
+      # The default dev runtime, and tests/bun runs with it.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.4"
       - run: vp check
-      - run: vp run -r test
+      - run: vp test
       # Build here, not in a publish lifecycle script, so failures show their output.
       - run: vp run -r build
       - id: changesets

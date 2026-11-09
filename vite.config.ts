@@ -10,4 +10,8 @@ export default defineConfig({
   run: {
     cache: true,
   },
+  test: {
+    // One Vitest run for every package: `vp test` from the root.
+    projects: ["packages/*"],
+  },
 });

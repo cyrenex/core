@@ -4,12 +4,13 @@ import { dirname, relative, resolve } from "node:path";
 import { normalizePath } from "vite";
 import type { Plugin } from "vite";
 
+import { buildPlugin, serverBuildOf } from "./build.ts";
 import { ElysiaEnvironment } from "./environment.ts";
+import { previewPlugin } from "./preview.ts";
+import { ENVIRONMENT } from "./types.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
-export type { CyrenexOptions, Runtime } from "./types.ts";
-
-const ENVIRONMENT = "elysia";
+export type { CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
 
 function resolveOptions(options: CyrenexOptions): ResolvedOptions {
   const runtime = options.runtime ?? (process.env.CYRENEX_RUNTIME as Runtime | undefined) ?? "bun";
@@ -22,7 +23,24 @@ function resolveOptions(options: CyrenexOptions): ResolvedOptions {
     routes: options.routes ?? ["/api", "/ws"],
     watch: options.watch ?? [],
     dts: options.dts ?? "cyrenex-env.d.ts",
+    execArgv: [...inspectArgv(options.inspect), ...(options.execArgv ?? [])],
+    env: options.env ?? {},
+    shutdownTimeout: options.shutdownTimeout ?? 1000,
+    build:
+      options.build === false
+        ? false
+        : {
+            entry: options.build?.entry ?? "server/main.ts",
+            outDir: options.build?.outDir ?? "dist/server",
+            auto: options.build?.entry === undefined,
+          },
   };
+}
+
+function inspectArgv(inspect: CyrenexOptions["inspect"]): string[] {
+  if (inspect === undefined || inspect === false) return [];
+  if (inspect === true) return ["--inspect=127.0.0.1:9229"];
+  return [`--inspect=${typeof inspect === "number" ? `127.0.0.1:${inspect}` : inspect}`];
 }
 
 export function renderDts(dtsFile: string, entryFile: string): string {
@@ -32,6 +50,13 @@ export function renderDts(dtsFile: string, entryFile: string): string {
 declare module "cyrenex/client" {
   interface Register {
     app: typeof import("${specifier}").default;
+  }
+}
+
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
   }
 }
 
@@ -53,6 +78,32 @@ function dtsPlugin(options: ResolvedOptions): Plugin {
   };
 }
 
+/** The server environment, shared by the dev server and the server build. */
+function environmentPlugin(options: ResolvedOptions): Plugin {
+  return {
+    name: "cyrenex:environment",
+    config(user, { command }) {
+      if (command === "build" && !serverBuildOf(options, resolve(user.root ?? process.cwd()))) {
+        return;
+      }
+      return {
+        environments: {
+          [ENVIRONMENT]: {
+            consumer: "server",
+            resolve: {
+              // Match package exports to the app's runtime rather than the Vite host.
+              conditions:
+                options.runtime === "node"
+                  ? ["node", "development|production"]
+                  : ["bun", "node", "development|production"],
+            },
+          },
+        },
+      };
+    },
+  };
+}
+
 /** Run the Elysia app in a child process and forward matching requests to it. */
 function devPlugin(options: ResolvedOptions): Plugin {
   return {
@@ -63,14 +114,6 @@ function devPlugin(options: ResolvedOptions): Plugin {
       return {
         environments: {
           [ENVIRONMENT]: {
-            consumer: "server",
-            resolve: {
-              // Match package exports to the child runtime rather than the Vite host.
-              conditions:
-                options.runtime === "node"
-                  ? ["node", "development"]
-                  : ["bun", "node", "development"],
-            },
             dev: {
               createEnvironment: (name, config) => new ElysiaEnvironment(name, config, options),
             },
@@ -103,5 +146,11 @@ function devPlugin(options: ResolvedOptions): Plugin {
  */
 export default function cyrenex(options: CyrenexOptions = {}): Plugin[] {
   const resolved = resolveOptions(options);
-  return [dtsPlugin(resolved), devPlugin(resolved)];
+  return [
+    dtsPlugin(resolved),
+    environmentPlugin(resolved),
+    devPlugin(resolved),
+    buildPlugin(resolved),
+    previewPlugin(resolved),
+  ];
 }

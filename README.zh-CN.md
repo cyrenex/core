@@ -15,15 +15,17 @@
 > [!NOTE]
 > 一条 `vp dev`，前端和 Elysia API 同源访问。API 跑在独立的 Bun 或 Node.js 进程里，文件变更即重启，退出前释放所有资源。
 
-搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、五个入口：
+搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个包、七个入口：
 
-| 入口             | 在哪里用          | 内容                                                                 |
-| ---------------- | ----------------- | -------------------------------------------------------------------- |
-| `cyrenex`        | 服务端            | `pondi`、`inject`、`RequestContext`、`warmup`，以及 pondi 的全部 API |
-| `cyrenex/node`   | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter                  |
-| `cyrenex/static` | 服务端（生产）    | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                         |
-| `cyrenex/vite`   | `vite.config.ts`  | 在子进程中运行应用，转发 `/api` 与 `/ws`，生成类型声明               |
-| `cyrenex/client` | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的相对路径  |
+| 入口              | 在哪里用          | 内容                                                                 |
+| ----------------- | ----------------- | -------------------------------------------------------------------- |
+| `cyrenex`         | 服务端            | `pondi`、`inject`、`RequestContext`、`warmup`，以及 pondi 的全部 API |
+| `cyrenex/node`    | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter                  |
+| `cyrenex/static`  | 服务端（生产）    | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                         |
+| `cyrenex/serve`   | 服务端（生产）    | `serve(app)`：预热、静态资源、监听与优雅退出                         |
+| `cyrenex/testing` | 测试              | `override(app, ...)` 替换已导出应用的 provider                       |
+| `cyrenex/vite`    | `vite.config.ts`  | 在子进程中运行应用，转发 `/api` 与 `/ws`，生成类型声明               |
+| `cyrenex/client`  | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的相对路径  |
 
 ## 特性
 
@@ -152,7 +154,7 @@ fork 是按需创建的：没有使用 `inject` 的路由完全不会碰到容�
 
 ### WebSocket
 
-在 WebSocket 路由中，注入的值位于 `ws.data`，作用域与连接同生命周期：每条消息拿到的都是同一批实例，并在你的 `close` handler 执行后释放。
+在 WebSocket 路由中，注入的值位于 `ws.data`，作用域与连接同生命周期：每条消息拿到的都是同一批实例，并在你的 `close` handler 执行后释放。如果升级被拒绝（钩子或 handler 返回错误状态），作用域会随响应一起释放。
 
 ```ts
 const Session = ripple("session", [RequestContext], (ctx) => openSession(ctx.headers), {
@@ -205,6 +207,13 @@ declare module "cyrenex/client" {
   }
 }
 
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
+  }
+}
+
 export {};
 ```
 
@@ -215,17 +224,32 @@ export {};
 
 ## 测试
 
-传入 fork 出的 Pond 来替换实现，再通过 Eden 直接调用应用，不经过网络：
+直接测试模块导出的应用，通过 Eden 调用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放，在 Vitest 与 `bun test` 中用法相同：
 
 ```ts
 import { treaty } from "@elysia/eden";
-import { pondi, ripple } from "cyrenex";
-import { Elysia } from "elysia";
+import { ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+import app from "../server/app.ts";
+import { Db } from "../server/services.ts";
 
-const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 const api = treaty(app);
 
-expect((await api.api.users.get()).data).toEqual([]);
+test("lists users", async () => {
+  await using _ = override(
+    app,
+    ripple(Db, () => fakeDb),
+  );
+  expect((await api.api.users.get()).data).toEqual([]);
+});
+```
+
+请求会从应用 Pond 的一个 fork 中解析，这个 fork 遮蔽了传入的 ripple：依赖它们的单例（依赖 `Db` 的 `UserService`）会在 fork 中重新创建，真实实例不受影响，恢复时 fork 会被释放。override 可以嵌套，按相反顺序恢复。它作用于该应用的所有请求，所以不要并发运行同一个应用的 override 测试。
+
+只想单独测试某个路由模块时，可以用 fork 出的 Pond 搭一个小应用：
+
+```ts
+const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 ```
 
 ## Vite 插件
@@ -237,26 +261,52 @@ cyrenex({
   routes: ["/api", "/ws"],
   watch: ["templates/**"],
   dts: "cyrenex-env.d.ts",
+  inspect: false,
+  execArgv: [],
+  env: {},
+  shutdownTimeout: 1000,
+  build: { entry: "server/main.ts", outDir: "dist/server" },
 });
 ```
 
-| 配置      | 默认值                                 | 说明                                                  |
-| --------- | -------------------------------------- | ----------------------------------------------------- |
-| `entry`   | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root            |
-| `runtime` | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                 |
-| `routes`  | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径          |
-| `watch`   | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启 |
-| `dts`     | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成     |
+| 配置              | 默认值                                 | 说明                                                           |
+| ----------------- | -------------------------------------- | -------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root                     |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                          |
+| `routes`          | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径；或 `"auto"`      |
+| `watch`           | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启          |
+| `dts`             | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成              |
+| `inspect`         | `false`                                | 开启调试器：`true`（`127.0.0.1:9229`）、端口号或 `"host:port"` |
+| `execArgv`        | `[]`                                   | 应用进程额外的运行时参数                                       |
+| `env`             | `{}`                                   | 应用进程的环境变量，覆盖 shell 与 `.env` 文件                  |
+| `shutdownTimeout` | `1000`                                 | 重启时等待 `app.stop()` 的毫秒数，超时强制结束旧进程           |
+| `build`           | 见[服务端构建](#服务端构建)            | 生产服务端构建；`false` 只构建前端                             |
 
 入口所在目录和所有经 Vite 加载的模块始终会被监听。`/api` 匹配 `/api` 和 `/api/users`，不匹配 `/apix`。
+
+设为 `routes: "auto"` 时，转发前缀取自应用所定义路由的第一个路径段（`/api/users/:id` → `/api`），每次重启都会重新读取，所以新增 `/rpc` 路由无需改配置。第一个路径段为空、为参数或通配符的路由（`/`、`/:slug`、`*`）会接管前端的所有页面，因此会被跳过并给出警告。
+
+### 环境变量
+
+应用进程会拿到 Vite `.env` 文件（`envDir` 下的 `.env`、`.env.local`、`.env.[mode]`、`.env.[mode].local`）中的全部变量，而不只是 `VITE_*`：这是服务端代码，不会进入浏览器。与 Vite 一致，shell 中已设置的变量优先。修改 `.env` 会重启开发服务器；`envDir: false` 可关闭加载。
+
+### 调试
+
+`inspect: true` 会以 `--inspect=127.0.0.1:9229` 启动应用，两种运行时都支持。下一个进程启动前端口已被释放，所以重启后端口不变，配置了自动重连的调试器（VS Code attach 配置中的 `"restart": true`）会跟着应用重新连接。Bun 可打开输出的 `debug.bun.sh` 链接或使用 Bun 扩展。
 
 ### 重启
 
 - 文件变更以 100ms 去抖并进入串行队列，重启期间到达的请求会等待新进程就绪。
-- 旧进程收到关闭消息后执行 `app.stop()`（触发 `onStop` 与 `pond.dispose()`），超过 1 秒会被强制结束。
+- 旧进程收到关闭消息后执行 `app.stop()`（触发 `onStop` 与 `pond.dispose()`），超过 `shutdownTimeout`（默认 1 秒）会被强制结束。
 - 应用不可用时 HTTP 返回 `503`，转发异常返回 `502`。
 - 重启会断开业务 WebSocket，客户端需在 `close` 时自行重连；Vite 的 HMR 连接不受影响。
-- 启动失败后，修正文件即可再次启动。
+- 每次重启后，页面会收到 `cyrenex:restart` HMR 事件，类型由 `cyrenex-env.d.ts` 提供：
+
+  ```ts
+  import.meta.hot?.on("cyrenex:restart", ({ runtime }) => refetch());
+  ```
+
+- 启动失败后，修正文件即可再次启动。错误同时会显示在 Vite 的错误浮层中，之后打开的页面也会显示；应用启动成功后浮层关闭，页面自动刷新。
 
 想在命令行切换运行时，可以把 Vite mode 映射过去：
 
@@ -273,32 +323,54 @@ vp dev --mode node  # Node.js
 
 ## 生产环境
 
-`vp build` 构建前端，服务端入口由你用原生 Elysia 自己编写：
+生产入口用 `cyrenex/serve` 几行即可。可以直接从源码运行，也可以让 `vp build` 把它和前端一起打包：
 
 ```ts
 // server/main.ts
-import { fileURLToPath } from "node:url";
-import { warmup } from "cyrenex";
-import { staticPlugin } from "cyrenex/static";
+import { serve } from "cyrenex/serve";
 import app from "./app.ts";
 
-await warmup(app); // 创建 `eager` 中的 singleton，失败则中止启动
-
-app
-  .use(await staticPlugin({ assets: fileURLToPath(new URL("../dist", import.meta.url)) }))
-  .listen(Number(process.env.PORT ?? 3000));
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => void app.stop().finally(() => process.exit(0)));
-}
+await serve(app);
 ```
 
 ```bash
-bun server/main.ts
+vp build                     # dist/client + dist/server/main.mjs
+
+node dist/server/main.mjs    # 构建产物
+bun dist/server/main.mjs
+bun server/main.ts           # 或直接运行源码，无需构建服务端
 node server/main.ts
 ```
 
-`app.stop()` 会执行 `onStop` 钩子并释放 Pond；在 Node.js 上需要使用 `cyrenex/node` adapter。
+`serve(app, options?)` 依次完成生产入口都需要做的事：
+
+1. 创建 `eager` 中的 singleton（`warmup(app)`），失败则在监听之前 reject。
+2. 在你的路由之后，通过 `cyrenex/static` 托管前端产物并提供 SPA 回退。构建后的服务端会在自身旁边找到它；从源码运行时为工作目录下的 `dist/client` 或 `dist`，都不存在时跳过。可用 `static: { assets }` 指定，或用 `static: false` 只提供 API。
+3. 监听 `PORT`（默认 `3000`）与 `HOST`，或使用 `port`、`hostname` 配置。
+4. 收到 `SIGINT` / `SIGTERM` 时停止应用（执行 `onStop` 钩子、释放 Pond）后退出。传入 `signals: false` 可自行处理信号。
+
+它返回 `{ port, url, stop }`。在 Node.js 上 `app.stop()` 需要 `cyrenex/node` adapter；`serve` 在没有时会自行关闭服务器并执行钩子。在 Bun 上，`app.stop()` 调用异步 `onStop` 钩子时不会等待它们完成，返回时 Pond 可能仍在释放；`serve` 返回的 `stop()`（以及开发服务器）会等待钩子完成后再返回。
+
+### 服务端构建
+
+存在 `server/main.ts` 时，`vp build` 会构建两个环境：前端输出到 `dist/client`，服务端输出到 `dist/server/main.mjs`。产物和源码一样从 `node_modules` 导入依赖，所以部署时带上 `package.json` 并安装生产依赖即可。在你的入口执行之前，构建后的服务端会：
+
+- 从工作目录加载 `.env.production.local`、`.env.local`、`.env.production` 与 `.env`，不覆盖已设置的变量；
+- 将 `NODE_ENV` 默认设为 `production`；
+- 让 `serve()` 指向自身旁边的前端产物，因此可以在任意工作目录运行。
+
+从源码运行时，Bun 会自动读取 `.env` 文件；Node.js 请使用 `node --env-file-if-exists=.env server/main.ts`。
+
+| `build` 配置 | 默认值             | 说明                                   |
+| ------------ | ------------------ | -------------------------------------- |
+| `entry`      | `"server/main.ts"` | 生产入口，相对 Vite root               |
+| `outDir`     | `"dist/server"`    | 服务端输出目录，不能位于前端输出目录内 |
+
+只有在你没有设置前端 `outDir` 时，前端才会改为输出到 `dist/client`；如果服务端输出会落在前端输出目录内（从而被当作静态文件公开），构建会失败。`build: false` 只构建前端。构建使用所配置 `runtime` 的导出条件；服务端相关的 Vite 配置写在 `environments.elysia` 下。
+
+### 预览
+
+`vp preview` 会用所配置的运行时启动构建好的 `dist/server/main.mjs`，并把所有请求和 WebSocket 转发给它。前端产物由服务端自己托管，所以预览看到的就是部署后的样子：相同的路由、相同的静态文件、相同的 SPA 回退。它会从预览服务器获得 `PORT` 与 `HOST`，`serve()` 会读取这两个变量。没有服务端构建时，预览只提供前端并给出提示。
 
 ### 静态资源
 
@@ -335,10 +407,8 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 ## 已知限制
 
-- 如果注入之后 WebSocket upgrade 失败，对应的作用域不会被释放，只能等待垃圾回收。
 - 在 Node.js 上，Elysia 只会在使用了支持 WebSocket 的 adapter 的实例上注册 `.ws()` 路由，所以定义 `.ws()` 的插件也要传入 adapter。
 - 在 Node.js 上，带 body schema 的 WebSocket 消息可能需要显式配置 `parse`。
-- 开发插件只用于开发。除了写入 `cyrenex-env.d.ts`，`vp build` 只构建前端，服务端入口与部署由应用自行管理。
 
 ## 本地开发
 

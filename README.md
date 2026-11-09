@@ -15,15 +15,17 @@
 > [!NOTE]
 > One `vp dev` serves your frontend and your Elysia API from the same origin. The API runs in its own Bun or Node.js process, restarts on change, and disposes every resource on the way out.
 
-Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with five entries:
+Building a full-stack TypeScript app usually means two dev servers, a proxy, a hand-rolled container and a client you keep in sync by hand. cyrenex folds that into one package with seven entries:
 
-| Entry            | Where            | What                                                                         |
-| ---------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `cyrenex`        | server           | `pondi`, `inject`, `RequestContext`, `warmup`, and all of pondi              |
-| `cyrenex/node`   | server (Node.js) | `@elysia/node` adapter with a working `app.stop()`                           |
-| `cyrenex/static` | server (prod)    | `@elysia/static` with Vite defaults and SPA fallback                         |
-| `cyrenex/vite`   | `vite.config.ts` | Runs the app in a child process, forwards `/api` and `/ws`, generates types  |
-| `cyrenex/client` | browser          | `type App`, so `treaty<App>()` never needs a `../server/app` relative import |
+| Entry             | Where            | What                                                                         |
+| ----------------- | ---------------- | ---------------------------------------------------------------------------- |
+| `cyrenex`         | server           | `pondi`, `inject`, `RequestContext`, `warmup`, and all of pondi              |
+| `cyrenex/node`    | server (Node.js) | `@elysia/node` adapter with a working `app.stop()`                           |
+| `cyrenex/static`  | server (prod)    | `@elysia/static` with Vite defaults and SPA fallback                         |
+| `cyrenex/serve`   | server (prod)    | `serve(app)`: warm-up, static files, listen, graceful shutdown               |
+| `cyrenex/testing` | tests            | `override(app, ...)` swaps providers of an exported app                      |
+| `cyrenex/vite`    | `vite.config.ts` | Runs the app in a child process, forwards `/api` and `/ws`, generates types  |
+| `cyrenex/client`  | browser          | `type App`, so `treaty<App>()` never needs a `../server/app` relative import |
 
 ## What's Special
 
@@ -152,7 +154,7 @@ Use `pondi(pond)` on the root app, before the routes. It decorates the context w
 
 ### WebSockets
 
-In a WebSocket route, injected values sit on `ws.data` and the scope lives as long as the connection: every message sees the same instances, and they are disposed after your `close` handler runs.
+In a WebSocket route, injected values sit on `ws.data` and the scope lives as long as the connection: every message sees the same instances, and they are disposed after your `close` handler runs. If the upgrade is rejected (a hook or the handler returns an error status), the scope is disposed with the response.
 
 ```ts
 const Session = ripple("session", [RequestContext], (ctx) => openSession(ctx.headers), {
@@ -205,6 +207,13 @@ declare module "cyrenex/client" {
   }
 }
 
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
+  }
+}
+
 export {};
 ```
 
@@ -215,17 +224,32 @@ Commit it and include it in your `tsconfig.json`, so a fresh clone type-checks b
 
 ## Testing
 
-Pass a forked Pond to swap implementations, and call the app through Eden without a network:
+Test the app your module exports, through Eden and without a network. `override` from `cyrenex/testing` swaps providers until it is disposed, the same way in Vitest and `bun test`:
 
 ```ts
 import { treaty } from "@elysia/eden";
-import { pondi, ripple } from "cyrenex";
-import { Elysia } from "elysia";
+import { ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+import app from "../server/app.ts";
+import { Db } from "../server/services.ts";
 
-const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 const api = treaty(app);
 
-expect((await api.api.users.get()).data).toEqual([]);
+test("lists users", async () => {
+  await using _ = override(
+    app,
+    ripple(Db, () => fakeDb),
+  );
+  expect((await api.api.users.get()).data).toEqual([]);
+});
+```
+
+Requests resolve from a fork of the app's Pond that shadows the given ripples: singletons depending on them (`UserService` on `Db`) are created again in the fork, the real ones are left alone, and the fork is disposed on restore. Overrides nest and are restored in reverse order. They apply to every request of that app, so don't run overriding tests of one app concurrently.
+
+To test a route module on its own, build a small app with a forked Pond instead:
+
+```ts
+const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
 ```
 
 ## Vite Plugin
@@ -237,26 +261,52 @@ cyrenex({
   routes: ["/api", "/ws"],
   watch: ["templates/**"],
   dts: "cyrenex-env.d.ts",
+  inspect: false,
+  execArgv: [],
+  env: {},
+  shutdownTimeout: 1000,
+  build: { entry: "server/main.ts", outDir: "dist/server" },
 });
 ```
 
-| Option    | Default                                | Description                                                                       |
-| --------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `entry`   | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
-| `runtime` | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
-| `routes`  | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten                  |
-| `watch`   | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
-| `dts`     | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
+| Option            | Default                                | Description                                                                       |
+| ----------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
+| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten; or `"auto"`     |
+| `watch`           | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
+| `dts`             | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
+| `inspect`         | `false`                                | Enable the inspector: `true` (`127.0.0.1:9229`), a port, or `"host:port"`         |
+| `execArgv`        | `[]`                                   | Extra runtime flags for the app process                                           |
+| `env`             | `{}`                                   | Variables for the app process, over the shell and `.env` files                    |
+| `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process      |
+| `build`           | see [Server build](#server-build)      | Production server build; `false` builds the client only                           |
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
+
+With `routes: "auto"`, the forwarded prefixes are the first segments of the routes your app defines (`/api/users/:id` → `/api`), read again on every restart, so adding a `/rpc` route needs no config change. Routes whose first segment is empty, a parameter or a wildcard (`/`, `/:slug`, `*`) would take every page from the frontend; they are skipped with a warning.
+
+### Environment variables
+
+The app process gets every variable from Vite's `.env` files (`.env`, `.env.local`, `.env.[mode]`, `.env.[mode].local` in `envDir`), not only `VITE_*` ones: it is server code, so nothing reaches the browser. Variables already set in the shell win, as in Vite. Editing a `.env` file restarts the dev server; `envDir: false` disables loading.
+
+### Debugging
+
+`inspect: true` starts the app with `--inspect=127.0.0.1:9229` on either runtime. The port is released before the next process starts, so it stays the same across restarts and a debugger set to reconnect (VS Code's `"restart": true` attach configuration) follows the app. For Bun, open the printed `debug.bun.sh` URL or use the Bun extension.
 
 ### Restarts
 
 - File changes are debounced by 100ms and queued; requests arriving mid-restart wait for the new process.
-- The old process gets a shutdown message, runs `app.stop()` (so `onStop` and `pond.dispose()` run), and is killed after 1 second.
+- The old process gets a shutdown message, runs `app.stop()` (so `onStop` and `pond.dispose()` run), and is killed after `shutdownTimeout` (1 second by default).
 - If the app is unavailable, HTTP returns `503`; forwarding errors return `502`.
 - Business WebSockets are closed on restart. Reconnect on `close` in the client; Vite's HMR socket is untouched.
-- After a startup error, fix the file and it starts again.
+- After each restart, pages receive a `cyrenex:restart` HMR event, typed by `cyrenex-env.d.ts`:
+
+  ```ts
+  import.meta.hot?.on("cyrenex:restart", ({ runtime }) => refetch());
+  ```
+
+- After a startup error, fix the file and it starts again. The error also shows in Vite's error overlay, including on pages opened later; once the app starts, the overlay is dismissed and the page reloads.
 
 To pick the runtime from the command line, map a Vite mode to it:
 
@@ -273,32 +323,54 @@ vp dev --mode node  # Node.js
 
 ## Production
 
-`vp build` builds the frontend. The server entry is yours, written with plain Elysia:
+The production entry is a few lines with `cyrenex/serve`. Run it from source, or let `vp build` bundle it next to the frontend:
 
 ```ts
 // server/main.ts
-import { fileURLToPath } from "node:url";
-import { warmup } from "cyrenex";
-import { staticPlugin } from "cyrenex/static";
+import { serve } from "cyrenex/serve";
 import app from "./app.ts";
 
-await warmup(app); // create `eager` singletons; a failure aborts startup
-
-app
-  .use(await staticPlugin({ assets: fileURLToPath(new URL("../dist", import.meta.url)) }))
-  .listen(Number(process.env.PORT ?? 3000));
-
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.once(signal, () => void app.stop().finally(() => process.exit(0)));
-}
+await serve(app);
 ```
 
 ```bash
-bun server/main.ts
+vp build                     # dist/client + dist/server/main.mjs
+
+node dist/server/main.mjs    # built
+bun dist/server/main.mjs
+bun server/main.ts           # or straight from source, no server build needed
 node server/main.ts
 ```
 
-`app.stop()` runs the `onStop` hooks and disposes the Pond; on Node.js this needs the `cyrenex/node` adapter.
+`serve(app, options?)` does what every production entry needs, in order:
+
+1. Creates the `eager` singletons (`warmup(app)`); a failure rejects before anything listens.
+2. Serves the client build through `cyrenex/static` with SPA fallback, after your routes. A built server finds it next to itself; from source it is `dist/client` or `dist` under the working directory, skipped if neither exists. Pass `static: { assets }` to choose, or `static: false` for an API only server.
+3. Listens on `PORT` (default `3000`) and `HOST`, or the `port` and `hostname` options.
+4. On `SIGINT` / `SIGTERM`, stops the app (`onStop` hooks, Pond disposal), then exits. Pass `signals: false` to handle them yourself.
+
+It resolves to `{ port, url, stop }`. On Node.js, `app.stop()` needs the `cyrenex/node` adapter; `serve` falls back to closing the server and running the hooks itself. On Bun, `app.stop()` calls async `onStop` hooks without awaiting them, so the Pond may still be disposing when it resolves; `stop()` from `serve` (and the dev server) awaits them before resolving.
+
+### Server build
+
+When `server/main.ts` exists, `vp build` builds both environments: the client to `dist/client`, the server to `dist/server/main.mjs`. The output imports its dependencies from `node_modules`, like the source does, so deploy it with your `package.json` and install production dependencies. Before your entry runs, the built server:
+
+- loads `.env.production.local`, `.env.local`, `.env.production` and `.env` from the working directory, without overriding variables already set,
+- defaults `NODE_ENV` to `production`,
+- points `serve()` at the client build next to it, so it runs from any working directory.
+
+From source, Bun reads `.env` files on its own; on Node.js run `node --env-file-if-exists=.env server/main.ts`.
+
+| `build` option | Default            | Description                                         |
+| -------------- | ------------------ | --------------------------------------------------- |
+| `entry`        | `"server/main.ts"` | Production entry, relative to Vite root             |
+| `outDir`       | `"dist/server"`    | Server output; must not be inside the client output |
+
+The client moves to `dist/client` only when you have not set its `outDir`; if the server output would land inside the client output (and be served as static files), the build fails. `build: false` builds the client only. The build uses the export conditions of the configured `runtime`; Vite settings for the server go under `environments.elysia`.
+
+### Preview
+
+`vp preview` runs the built `dist/server/main.mjs` with the configured runtime and forwards every request and WebSocket to it. The server hosts the client build itself, so the preview is what a deployment serves: same routes, same static files, same SPA fallback. It gets `PORT` and `HOST` from the preview server; `serve()` reads both. Without a server build, the preview serves the client only and says so.
 
 ### Static files
 
@@ -335,10 +407,8 @@ export const adapter = "Bun" in globalThis ? undefined : (await import("cyrenex/
 
 ## Known Limitations
 
-- If a WebSocket upgrade fails after injection, its scope is not disposed and is left to garbage collection.
 - On Node.js, Elysia only registers WebSocket routes on instances created with a WebSocket-capable adapter, so pass the adapter to plugins that define `.ws()` routes too.
 - On Node.js, WebSocket messages with a body schema may need an explicit `parse`.
-- The dev plugin is development only. Apart from writing `cyrenex-env.d.ts`, `vp build` builds just the frontend; the server entry and deployment are yours.
 
 ## Development
 

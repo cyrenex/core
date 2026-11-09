@@ -7,8 +7,9 @@
     "dev": "vp dev",
     "dev:node": "vp dev --mode node",
     "build": "vp build",
-    "start": "bun server/main.ts",
-    "start:node": "node server/main.ts"
+    "start": "bun dist/server/main.mjs",
+    "start:node": "node dist/server/main.mjs",
+    "start:source": "bun server/main.ts"
   },
   "dependencies": {
     "@elysia/eden": "catalog:",

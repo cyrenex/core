@@ -5,4 +5,11 @@ declare module "cyrenex/client" {
   }
 }
 
+declare module "vite/types/customEvent.d.ts" {
+  interface CustomEventMap {
+    /** The app process restarted after a server change. */
+    "cyrenex:restart": { runtime: "bun" | "node" };
+  }
+}
+
 export {};

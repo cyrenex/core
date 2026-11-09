@@ -82,4 +82,7 @@ $<HTMLFormElement>("#ws-form").onsubmit = (event) => {
   form.reset();
 };
 
+// Sent by the dev server after the app process restarted (typed by cyrenex-env.d.ts).
+import.meta.hot?.on("cyrenex:restart", () => void Promise.all([hello(), renderTodos()]));
+
 await Promise.all([hello(), renderTodos()]);

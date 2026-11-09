@@ -1,3 +1,17 @@
+/** Vite environment running (in dev) and building the server. */
+export const ENVIRONMENT = "elysia";
+
+/** Set by the built server entry to the client build directory; read by `serve()`. */
+export const CLIENT_DIR_ENV = "CYRENEX_CLIENT_DIR";
+
+/** HMR event sent to pages after the app restarted. */
+export const RESTART_EVENT = "cyrenex:restart";
+
+/** Payload of {@link RESTART_EVENT}. */
+export interface RestartEvent {
+  runtime: Runtime;
+}
+
 /** Runtime executable used to launch the isolated application process. */
 export type Runtime = "node" | "bun";
 
@@ -16,9 +30,11 @@ export interface CyrenexOptions {
 
   /**
    * Path prefixes forwarded to the app, matched by whole segments, without rewriting.
+   * `"auto"` forwards the first segment of every route the app defines (`/api/users/:id` →
+   * `/api`), re-read on each restart; routes such as `/` or `/:id` are skipped with a warning.
    * @default ["/api", "/ws"]
    */
-  routes?: string[];
+  routes?: string[] | "auto";
 
   /**
    * Extra files, directories or globs (relative to Vite root) that restart the app.
@@ -34,14 +50,54 @@ export interface CyrenexOptions {
    * @default "cyrenex-env.d.ts"
    */
   dts?: string | false;
+
+  /**
+   * Start the app with the inspector enabled: `true` for `127.0.0.1:9229`, a port, or
+   * `"host:port"`. The port stays the same across restarts, so a debugger can reattach.
+   * @default false
+   */
+  inspect?: boolean | number | string;
+
+  /**
+   * Extra runtime flags for the app process, e.g. `["--enable-source-maps"]`.
+   * @default []
+   */
+  execArgv?: string[];
+
+  /**
+   * Variables for the app process, on top of the shell and the `.env` files.
+   * @default {}
+   */
+  env?: Record<string, string>;
+
+  /**
+   * How long a restart waits for `app.stop()` (and the Pond's disposal) before killing the
+   * old process, in milliseconds.
+   * @default 1000
+   */
+  shutdownTimeout?: number;
+
+  /**
+   * Build the production server with `vp build`: `entry` (your `serve(app)` module, relative
+   * to Vite root) is bundled to `outDir/main.mjs`, and the client build moves to `dist/client`
+   * unless you set its `outDir`. Dependencies stay external, as in Vite's SSR builds.
+   * Enabled by default when `server/main.ts` exists; `false` builds the client only.
+   * @default { entry: "server/main.ts", outDir: "dist/server" }
+   */
+  build?: false | { entry?: string; outDir?: string };
 }
 
 export interface ResolvedOptions {
   entry: string;
   runtime: Runtime;
-  routes: string[];
+  routes: string[] | "auto";
   watch: false | string[];
   dts: string | false;
+  execArgv: string[];
+  env: Record<string, string>;
+  shutdownTimeout: number;
+  /** `auto`: defaulted, so skipped when the entry does not exist. */
+  build: false | { entry: string; outDir: string; auto: boolean };
 }
 
 /** Bootstrap data serialized by env-runner and delivered to the child over IPC. */
@@ -69,9 +125,19 @@ export interface WorkerControlMessage {
  */
 export type ServerAdapter = (exported: unknown) => ServerHandle;
 
+/** Sent by the worker once the app listens, next to env-runner's `address`. */
+export interface WorkerReadyMessage {
+  address: { host: string; port: number };
+  /** Route paths defined by the app, for `routes: "auto"`. */
+  paths: string[];
+}
+
 export interface ServerHandle {
-  /** Run startup work (plugins, warm-up) and listen on a random port of `hostname`. */
-  listen(options: { hostname: string }): Promise<{ port: number }>;
+  /**
+   * Run startup work (plugins, warm-up) and listen on a random port of `hostname`. Returns the
+   * port and the app's route paths.
+   */
+  listen(options: { hostname: string }): Promise<{ port: number; paths: string[] }>;
   /**
    * Stop the server and release app resources. May be called before `listen` settles or
    * after it failed, and must still release whatever was acquired.

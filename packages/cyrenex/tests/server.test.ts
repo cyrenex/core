@@ -1,6 +1,6 @@
 // Real listeners on Node.js through `cyrenex/node`: stop/dispose and WebSocket scopes.
 import { node as elysiaNode } from "@elysia/node";
-import { Elysia } from "elysia";
+import { Elysia, file } from "elysia";
 import type { AnyElysia } from "elysia";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
@@ -55,6 +55,25 @@ describe("cyrenex/node", () => {
     running.length = 0;
     expect(app.server).toBeNull();
     expect(log).toEqual(["db:close"]);
+  });
+
+  test("sends files with a valid length header", async () => {
+    // Upstream sends both content-length and transfer-encoding, which strict clients reject.
+    const app = new Elysia({ adapter: node() }).get("/file", () => file(import.meta.filename));
+    const { port } = await listen(app);
+    const response = await fetch(`http://127.0.0.1:${port}/file`);
+    expect(response.headers.get("transfer-encoding")).toBeNull();
+    expect(await response.text()).toContain("sends files with a valid length header");
+  });
+
+  test("still streams responses of unknown length", async () => {
+    const app = new Elysia({ adapter: node() }).get("/stream", async function* () {
+      yield "a";
+      await settle(10);
+      yield "b";
+    });
+    const { port } = await listen(app);
+    expect(await fetch(`http://127.0.0.1:${port}/stream`).then((r) => r.text())).toBe("ab");
   });
 
   test("stopApp falls back for plain @elysia/node", async () => {
@@ -140,5 +159,34 @@ describe("WebSocket scopes", () => {
     b.ws.close();
     await settle();
     expect(log).toContain("dispose 2");
+  });
+
+  test("are disposed when the upgrade is rejected", async () => {
+    const log: string[] = [];
+    const Session = ripple(
+      "session",
+      () => (log.push("create"), { [Symbol.dispose]: () => log.push("dispose") }),
+      { mode: "scoped" },
+    );
+    const app = new Elysia({ adapter: node() })
+      .use(pondi(new Pond()))
+      .use(inject({ session: Session }))
+      .ws("/ws", {
+        beforeHandle: ({ status }) => status(401),
+        message() {},
+      });
+    const { port } = await listen(app);
+
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    await new Promise((resolve) => {
+      ws.onerror = resolve;
+      ws.onclose = resolve;
+    });
+    await settle();
+    // @elysia/node may run the rejected upgrade through the app more than once.
+    expect(log.length).toBeGreaterThan(0);
+    expect(log.filter((l) => l === "create").length).toBe(
+      log.filter((l) => l === "dispose").length,
+    );
   });
 });
