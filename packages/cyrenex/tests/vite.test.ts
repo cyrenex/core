@@ -1,4 +1,5 @@
-// The dev plugin end to end: a real Vite dev server running a fixture app in a Node.js child.
+// The dev plugin end to end: a real Vite dev server running a fixture app in a Node.js or Bun
+// child.
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -8,7 +9,8 @@ import type { ViteDevServer } from "vite";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
 import cyrenex from "../src/vite/index.ts";
-import type { CyrenexOptions } from "../src/vite/index.ts";
+import type { CyrenexOptions, Runtime } from "../src/vite/index.ts";
+import { runtimes } from "./runtimes.ts";
 
 // Inside the package, so the fixture resolves elysia from its node_modules.
 const TMP = join(import.meta.dirname, "../.tmp/vite");
@@ -17,8 +19,14 @@ const app = (message: string, extra = "") => `
 import { Elysia } from "elysia";
 import { node } from "@elysia/node";
 
-export default new Elysia({ adapter: node() })
-  .get("/api/hello", () => ({ message: ${JSON.stringify(message)}, pid: process.pid }))
+const bun = "Bun" in globalThis;
+
+export default new Elysia({ adapter: bun ? undefined : node() })
+  .get("/api/hello", () => ({
+    message: ${JSON.stringify(message)},
+    pid: process.pid,
+    runtime: bun ? "bun" : "node",
+  }))
   .ws("/ws", { message(ws, message) { ws.send(message); } })
   ${extra};
 `;
@@ -37,7 +45,8 @@ afterEach(async () => {
   rmSync(TMP, { recursive: true, force: true });
 });
 
-async function start(
+async function launch(
+  runtime: Runtime,
   files: Record<string, string>,
   options: CyrenexOptions = {},
   config: { mode?: string; envDir?: string } = {},
@@ -55,11 +64,15 @@ async function start(
     configFile: false,
     logLevel: "silent",
     server: { port: 0, host: "127.0.0.1" },
-    plugins: [cyrenex({ runtime: "node", ...options })],
+    plugins: [cyrenex({ runtime, ...options })],
     ...config,
   });
   servers.push(server);
   await server.listen();
+  // Until chokidar's initial scan ends, a write right after start can be taken for an initial
+  // file and never reported, so the restart a test waits for would not come.
+  const watcher = server.watcher as typeof server.watcher & { _readyEmitted?: boolean };
+  if (!watcher._readyEmitted) await new Promise((resolve) => watcher.once("ready", resolve));
   const { port } = server.httpServer!.address() as AddressInfo;
   return { root, url: `http://127.0.0.1:${port}`, server, write };
 }
@@ -90,11 +103,14 @@ async function hmr(fixture: Fixture) {
 
 const json = (url: string) => fetch(url).then((r) => r.json() as Promise<Record<string, unknown>>);
 
-describe("cyrenex/vite", { timeout: 30_000 }, () => {
+describe.each(runtimes)("cyrenex/vite on %s", { timeout: 30_000 }, (runtime) => {
+  const start = (files: Record<string, string>, options?: CyrenexOptions, config?: object) =>
+    launch(runtime, files, options, config);
+
   test("forwards matching routes and leaves the rest to Vite", async () => {
     const { url, root } = await start({ "server/app.ts": app("hi") });
 
-    expect(await json(`${url}/api/hello`)).toMatchObject({ message: "hi" });
+    expect(await json(`${url}/api/hello`)).toMatchObject({ message: "hi", runtime });
     expect((await fetch(`${url}/api/missing`)).status).toBe(404);
     expect(await fetch(`${url}/`).then((r) => r.text())).toContain("<p>web</p>");
     // `/apix` does not match the `/api` prefix.
@@ -195,7 +211,7 @@ describe("cyrenex/vite", { timeout: 30_000 }, () => {
     const page = await hmr(fixture);
     fixture.write("server/app.ts", app("two"));
     const event = await until(async () => page.messages.find((m) => m.type === "custom"), Boolean);
-    expect(event).toEqual({ type: "custom", event: "cyrenex:restart", data: { runtime: "node" } });
+    expect(event).toEqual({ type: "custom", event: "cyrenex:restart", data: { runtime } });
     page.close();
   });
 

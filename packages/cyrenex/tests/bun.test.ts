@@ -1,28 +1,15 @@
 // Runs tests/bun/*.test.ts with `bun test`, one Vitest test per file: they cover what only
 // happens inside a Bun process (Bun.serve, its WebSockets, `bun test` itself).
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
 import { describe, test } from "vite-plus/test";
 
+import { bun } from "./runtimes.ts";
+
 const ROOT = join(import.meta.dirname, "..");
 const files = readdirSync(join(import.meta.dirname, "bun")).filter((f) => f.endsWith(".test.ts"));
-
-function findBun(): string | undefined {
-  try {
-    return execFileSync("bun", ["-p", "process.execPath"], { encoding: "utf8" }).trim();
-  } catch {
-    return undefined;
-  }
-}
-
-const bun = findBun();
-if (!bun) {
-  // CI installs Bun, so a missing one there is a setup error, not something to skip.
-  if (process.env.CI) throw new Error("bun is not on PATH; the Bun tests cannot run");
-  console.warn("bun is not on PATH: skipping tests/bun (install Bun to run them)");
-}
 
 function run(file: string): Promise<{ code: number | null; output: string }> {
   return new Promise((resolve, reject) => {

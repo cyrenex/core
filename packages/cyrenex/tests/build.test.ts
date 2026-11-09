@@ -1,4 +1,5 @@
-// The server build end to end: `vp build` a fixture, then run the output like a deployment.
+// The server build end to end: `vp build` a fixture, then run the output like a deployment, on
+// Node.js and Bun.
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -10,7 +11,8 @@ import type { UserConfig } from "vite";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
 import cyrenex from "../src/vite/index.ts";
-import type { CyrenexOptions } from "../src/vite/index.ts";
+import type { CyrenexOptions, Runtime } from "../src/vite/index.ts";
+import { executableOf, runtimes } from "./runtimes.ts";
 
 // Inside the package, so the output resolves elysia and @elysia/* from its node_modules.
 const TMP = join(import.meta.dirname, "../.tmp/build");
@@ -23,8 +25,14 @@ const files = {
 import { Elysia } from "elysia";
 import { node } from ${source("node.ts")};
 
-export default new Elysia({ adapter: node() })
-  .get("/api/env", () => ({ greeting: process.env.GREETING, mode: process.env.NODE_ENV }))
+const bun = "Bun" in globalThis;
+
+export default new Elysia({ adapter: bun ? undefined : node() })
+  .get("/api/env", () => ({
+    greeting: process.env.GREETING,
+    mode: process.env.NODE_ENV,
+    runtime: bun ? "bun" : "node",
+  }))
   .ws("/ws", { message(ws, message) { ws.send(message); } });
 `,
   "server/main.ts": `
@@ -75,10 +83,10 @@ async function build(
 }
 
 /** Run the built server from `cwd`, as `node dist/server/main.mjs` would in a deployment. */
-async function run(cwd: string, main: string) {
+async function run(runtime: Runtime, cwd: string, main: string) {
   // A clean deployment environment: no NODE_ENV (vitest sets "test"), no GREETING.
   const { NODE_ENV: _, GREETING: __, ...env } = process.env;
-  const child = spawn(process.execPath, [main], {
+  const child = spawn(executableOf(runtime), [main], {
     cwd,
     // PORT=0: the server picks a free port and logs it; no race with other tests' servers.
     env: { ...env, PORT: "0" },
@@ -97,40 +105,41 @@ async function run(cwd: string, main: string) {
   return `http://127.0.0.1:${listening[1]}`;
 }
 
-describe("server build", { timeout: 60_000 }, () => {
+describe.each(runtimes)("server build on %s", { timeout: 60_000 }, (runtime) => {
   test("builds client and server, runnable from any working directory", async () => {
-    const root = await build({ ...files, ".env.production": "GREETING=from file" });
+    const root = await build({ ...files, ".env.production": "GREETING=from file" }, { runtime });
     expect(existsSync(join(root, "dist/client/index.html"))).toBe(true);
     expect(existsSync(join(root, "dist/server/main.mjs"))).toBe(true);
 
-    const url = await run(root, "dist/server/main.mjs");
+    const url = await run(runtime, root, "dist/server/main.mjs");
     // .env files of the mode load before the app; NODE_ENV defaults to production.
     expect(await fetch(`${url}/api/env`).then((r) => r.json())).toEqual({
       greeting: "from file",
       mode: "production",
+      runtime,
     });
     const page = await fetch(`${url}/some/page`, { headers: { accept: "text/html" } });
     expect(await page.text()).toBe("<p>web</p>");
 
     // The client directory is found next to the server output, not from the cwd.
-    const elsewhere = await run(TMP, join(root, "dist/server/main.mjs"));
+    const elsewhere = await run(runtime, TMP, join(root, "dist/server/main.mjs"));
     expect(await fetch(`${elsewhere}/`).then((r) => r.text())).toBe("<p>web</p>");
   });
 
   test("vp preview runs the built server", async () => {
-    const root = await build(files);
+    const root = await build(files, { runtime });
     const server = await preview({
       root,
       configFile: false,
       logLevel: "silent",
       preview: { port: 0, host: "127.0.0.1" },
-      plugins: [cyrenex({ runtime: "node" })],
+      plugins: [cyrenex({ runtime })],
     });
     previews.push(server);
     const url = server.resolvedUrls!.local[0]!.replace(/\/$/, "");
 
-    // Answered by the built server (the preview inherits NODE_ENV from vitest here).
-    expect(await fetch(`${url}/api/env`).then((r) => r.json())).toHaveProperty("mode");
+    // Answered by the built server, on the configured runtime.
+    expect(await fetch(`${url}/api/env`).then((r) => r.json())).toMatchObject({ runtime });
     const page = await fetch(`${url}/deep/link`, { headers: { accept: "text/html" } });
     expect(await page.text()).toBe("<p>web</p>");
 
@@ -144,7 +153,9 @@ describe("server build", { timeout: 60_000 }, () => {
     expect(await reply).toBe("ping");
     ws.close();
   });
+});
 
+describe("server build", { timeout: 60_000 }, () => {
   test("builds only the client without a server entry", async () => {
     const { "server/main.ts": _, ...rest } = files;
     const root = await build(rest);
