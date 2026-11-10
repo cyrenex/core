@@ -9,6 +9,7 @@ import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { createFilter, DevEnvironment, loadEnv, normalizePath } from "vite";
 import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
+import { locate, packageDirOf } from "./packages.ts";
 import { RuntimeProcessRunner } from "./process.ts";
 import type { ProcessOptions } from "./process.ts";
 import { matchesRoutes, normalizeRoutes, prefixesOf } from "./routes.ts";
@@ -53,7 +54,12 @@ export class ElysiaEnvironment extends DevEnvironment {
   private failure: ErrorPayload["err"] | undefined;
 
   constructor(name: string, config: ResolvedConfig, options: ResolvedOptions) {
-    const entry = normalizePath(resolve(config.root, options.entry));
+    const entry = locate(config.root, options.entry);
+    // In a monorepo the app may belong to another package: run it there, with its own `.env`
+    // files, as it runs in production.
+    const own = packageDirOf(normalizePath(config.root));
+    const server = packageDirOf(dirname(entry));
+    const elsewhere = server !== undefined && server !== own;
     const backend = new RunnerManager();
 
     super(name, config, {
@@ -76,10 +82,15 @@ export class ElysiaEnvironment extends DevEnvironment {
       // Every variable of `.env`, `.env.local`, `.env.[mode]`… not only `VITE_*`: the app is
       // server code. Existing process variables win, as in Vite. Vite restarts on changes.
       env: {
-        ...(config.envDir === false ? {} : loadEnv(config.mode, config.envDir, "")),
+        ...(elsewhere
+          ? loadEnv(config.mode, server, "")
+          : config.envDir === false
+            ? {}
+            : loadEnv(config.mode, config.envDir, "")),
         ...options.env,
       },
       execArgv: options.execArgv,
+      cwd: elsewhere ? server : undefined,
     };
     this.shutdownTimeout = options.shutdownTimeout;
     this.watching = options.watch !== false;

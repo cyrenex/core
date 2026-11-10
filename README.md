@@ -39,6 +39,7 @@ Building a full-stack TypeScript app usually means two dev servers, a proxy, a h
 - **Plain Elysia**: no app factory. You create the app, pass your own adapter, and `.use(pondi(pond))`.
 - **Eden without paths**: a generated `cyrenex-env.d.ts` registers your app type, so the browser imports it from `cyrenex/client`.
 - **Same source in production**: the same `app.ts` runs on Bun and Node.js; `cyrenex/static` hosts the build with SPA fallback.
+- **Monorepo friendly**: the app may live in another workspace package, and the client build can be copied into it.
 
 ## Installation
 
@@ -269,18 +270,18 @@ cyrenex({
 });
 ```
 
-| Option            | Default                                | Description                                                                       |
-| ----------------- | -------------------------------------- | --------------------------------------------------------------------------------- |
-| `entry`           | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root                    |
-| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                  |
-| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten; or `"auto"`     |
-| `watch`           | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts |
-| `dts`             | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it              |
-| `inspect`         | `false`                                | Enable the inspector: `true` (`127.0.0.1:9229`), a port, or `"host:port"`         |
-| `execArgv`        | `[]`                                   | Extra runtime flags for the app process                                           |
-| `env`             | `{}`                                   | Variables for the app process, over the shell and `.env` files                    |
-| `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process      |
-| `build`           | see [Server build](#server-build)      | Production server build; `false` builds the client only                           |
+| Option            | Default                                | Description                                                                                  |
+| ----------------- | -------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | Module default-exporting the Elysia app, relative to Vite root or [in a package](#monorepos) |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` or `"node"`, both run in a child process                                             |
+| `routes`          | `["/api", "/ws"]`                      | Forwarded path prefixes, matched by whole segment, not rewritten; or `"auto"`                |
+| `watch`           | `[]`                                   | Extra files, directories or globs that restart the app; `false` disables restarts            |
+| `dts`             | `"cyrenex-env.d.ts"`                   | Where to write the `cyrenex/client` declaration; `false` disables it                         |
+| `inspect`         | `false`                                | Enable the inspector: `true` (`127.0.0.1:9229`), a port, or `"host:port"`                    |
+| `execArgv`        | `[]`                                   | Extra runtime flags for the app process                                                      |
+| `env`             | `{}`                                   | Variables for the app process, over the shell and `.env` files                               |
+| `shutdownTimeout` | `1000`                                 | Milliseconds a restart waits for `app.stop()` before killing the old process                 |
+| `build`           | see [Server build](#server-build)      | Production server build; `false` builds the client only                                      |
 
 The entry directory and every module loaded through Vite are always watched. `/api` matches `/api` and `/api/users`, not `/apix`.
 
@@ -361,16 +362,45 @@ When `server/main.ts` exists, `vp build` builds both environments: the client to
 
 From source, Bun reads `.env` files on its own; on Node.js run `node --env-file-if-exists=.env server/main.ts`.
 
-| `build` option | Default            | Description                                         |
-| -------------- | ------------------ | --------------------------------------------------- |
-| `entry`        | `"server/main.ts"` | Production entry, relative to Vite root             |
-| `outDir`       | `"dist/server"`    | Server output; must not be inside the client output |
+| `build` option | Default                                       | Description                                                                               |
+| -------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `entry`        | `"server/main.ts"`                            | Production entry, relative to Vite root or [in a package](#monorepos)                     |
+| `outDir`       | `"dist/server"`                               | Server output; must not be inside the client output. `false` ships the server as source   |
+| `client`       | Vite's `build.outDir`, or `"dist/client"`     | Client output directory, or `{ outDir, copyTo }` to also copy it elsewhere                |
+| `start`        | the runtime on the built server, or the entry | Command shown after the build (`"pnpm --filter @acme/api start"`); cyrenex only prints it |
 
-The client moves to `dist/client` only when you have not set its `outDir`; if the server output would land inside the client output (and be served as static files), the build fails. `build: false` builds the client only. The build uses the export conditions of the configured `runtime`; Vite settings for the server go under `environments.elysia`.
+The client moves to `dist/client` only when the server is bundled and you have not set its `outDir`; if the server output would land inside the client output (and be served as static files), the build fails. `build: false` builds the client only. The build uses the export conditions of the configured `runtime`; Vite settings for the server go under `environments.elysia`.
+
+After building, cyrenex prints where the client and server went and how to start the server.
 
 ### Preview
 
-`vp preview` runs the built `dist/server/main.mjs` with the configured runtime and forwards every request and WebSocket to it. The server hosts the client build itself, so the preview is what a deployment serves: same routes, same static files, same SPA fallback. It gets `PORT` and `HOST` from the preview server; `serve()` reads both. Without a server build, the preview serves the client only and says so.
+`vp preview` runs the built `dist/server/main.mjs` (or, with `outDir: false`, the entry from source, in its package) with the configured runtime and forwards every request and WebSocket to it. The server hosts the client build itself, so the preview is what a deployment serves: same routes, same static files, same SPA fallback. It gets `PORT` and `HOST` from the preview server; `serve()` reads both. Without a server entry, the preview serves the client only.
+
+### Monorepos
+
+The server can live in its own workspace package. `entry`, `build.entry` and `build.client.copyTo` take a path relative to Vite root, or a package and a path inside it:
+
+```ts
+// apps/web/vite.config.ts
+cyrenex({
+  entry: { package: "@acme/api", path: "src/app.ts" },
+  build: {
+    entry: { package: "@acme/api", path: "src/main.ts" },
+    outDir: false, // ship the server as source, from its package
+    client: { copyTo: { package: "@acme/api", path: "dist" } },
+    start: "pnpm --filter @acme/api start",
+  },
+});
+```
+
+A package is looked up in `node_modules` up from Vite root, so a declared dependency (`"@acme/api": "workspace:*"`) is found as installed; otherwise among the packages of the workspace (`pnpm-workspace.yaml`, or `workspaces` in `package.json` for npm, yarn and bun), without installing.
+
+- `vp dev` runs the app in the server package's directory, with that package's `.env` files.
+- `vp build` writes the client, copies it into the server package (where `serve()` finds `dist` under its working directory), and prints how to start the server: `cd ../api && bun src/main.ts`, or your `build.start`.
+- `vp preview` runs the entry from source, in its package.
+
+Directories outside Vite root are emptied before writing, so `client` and `copyTo` refuse a package root (`../api`, or `path: "."`): use a directory inside it. You can also bundle a server from another package (leave `outDir` set): its dependencies stay external, so they must resolve from the web package that holds `dist/server`.
 
 ### Static files
 

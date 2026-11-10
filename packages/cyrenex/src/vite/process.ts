@@ -34,6 +34,8 @@ export interface ProcessOptions {
   env: Record<string, string>;
   /** Runtime flags placed before the worker entry. */
   execArgv: string[];
+  /** Working directory of the app. @default the host's */
+  cwd?: string;
 }
 
 /** Runs the worker in a Node.js or Bun child process connected over IPC. */
@@ -50,6 +52,7 @@ export class RuntimeProcessRunner extends BaseEnvRunner {
 
     this._initWithVirtualData(() => {
       const child = spawn(executableOf(runtime), [...options.execArgv, workerEntry], {
+        cwd: options.cwd,
         env: { ...this._processEnv(), ...options.env },
         stdio: ["ignore", "pipe", "pipe", "ipc"],
       });

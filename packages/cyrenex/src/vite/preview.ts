@@ -5,12 +5,13 @@ import { request } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { connect, createServer } from "node:net";
 import type { AddressInfo, Socket } from "node:net";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 import { normalizePath } from "vite";
 import type { Logger, Plugin } from "vite";
 
-import { serverBuildOf } from "./build.ts";
+import { serverBuildOf, serverEntryOf } from "./build.ts";
+import { packageDirOf } from "./packages.ts";
 import { executableOf } from "./process.ts";
 import type { ResolvedOptions } from "./types.ts";
 
@@ -107,7 +108,8 @@ function start(main: string, root: string, options: ResolvedOptions, logger: Log
 }
 
 /**
- * `vp preview`: run the built server (`dist/server/main.mjs`) with the configured runtime and
+ * `vp preview`: run the built server (`dist/server/main.mjs`, or the entry itself when it ships
+ * as source) with the configured runtime and
  * forward every request and WebSocket to it. The server hosts the client build itself, as in
  * production, so the preview shows exactly what a deployment serves.
  */
@@ -117,9 +119,12 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
 
     configurePreviewServer(server) {
       const { root, logger } = server.config;
+      const entry = serverEntryOf(options, root);
+      if (!entry) return;
       const build = serverBuildOf(options, root);
-      if (!build) return;
-      const main = resolve(root, build.outDir, "main.mjs");
+      // Shipped as source: run the entry itself, from its package as in production.
+      const main = build ? resolve(root, build.outDir, "main.mjs") : entry;
+      const cwd = build ? root : (packageDirOf(dirname(entry)) ?? root);
       if (!existsSync(main)) {
         logger.warn(
           `cyrenex: ${normalizePath(relative(root, main))} is missing; run vp build to preview ` +
@@ -128,7 +133,7 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
         return;
       }
 
-      const { ready, kill, stop } = start(main, root, options, logger);
+      const { ready, kill, stop } = start(main, cwd, options, logger);
 
       // Before Vite's static middlewares; if the server failed to start, they serve the client.
       server.middlewares.use((req, res, next) => {

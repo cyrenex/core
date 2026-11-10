@@ -39,6 +39,7 @@
 - **原生 Elysia**：没有应用工厂。应用由你创建、adapter 由你传入，再 `.use(pondi(pond))` 即可。
 - **Eden 免路径**：自动生成的 `cyrenex-env.d.ts` 注册应用类型，浏览器直接从 `cyrenex/client` 导入。
 - **生产环境同一份源码**：同一个 `app.ts` 可在 Bun 和 Node.js 上运行；`cyrenex/static` 托管前端产物并处理 SPA 回退。
+- **支持 Monorepo**：应用可以放在另一个 workspace 包中，前端产物也可以复制进去。
 
 ## 安装
 
@@ -269,18 +270,18 @@ cyrenex({
 });
 ```
 
-| 配置              | 默认值                                 | 说明                                                           |
-| ----------------- | -------------------------------------- | -------------------------------------------------------------- |
-| `entry`           | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root                     |
-| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                          |
-| `routes`          | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径；或 `"auto"`      |
-| `watch`           | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启          |
-| `dts`             | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成              |
-| `inspect`         | `false`                                | 开启调试器：`true`（`127.0.0.1:9229`）、端口号或 `"host:port"` |
-| `execArgv`        | `[]`                                   | 应用进程额外的运行时参数                                       |
-| `env`             | `{}`                                   | 应用进程的环境变量，覆盖 shell 与 `.env` 文件                  |
-| `shutdownTimeout` | `1000`                                 | 重启时等待 `app.stop()` 的毫秒数，超时强制结束旧进程           |
-| `build`           | 见[服务端构建](#服务端构建)            | 生产服务端构建；`false` 只构建前端                             |
+| 配置              | 默认值                                 | 说明                                                                    |
+| ----------------- | -------------------------------------- | ----------------------------------------------------------------------- |
+| `entry`           | `"server/app.ts"`                      | 默认导出 Elysia 应用的模块，相对 Vite root，或[位于某个包内](#monorepo) |
+| `runtime`         | `process.env.CYRENEX_RUNTIME ?? "bun"` | `"bun"` 或 `"node"`，都运行在子进程中                                   |
+| `routes`          | `["/api", "/ws"]`                      | 转发的路径前缀，按完整路径段匹配，不改写路径；或 `"auto"`               |
+| `watch`           | `[]`                                   | 额外触发重启的文件、目录或 glob；`false` 关闭自动重启                   |
+| `dts`             | `"cyrenex-env.d.ts"`                   | `cyrenex/client` 声明的写入位置；`false` 关闭生成                       |
+| `inspect`         | `false`                                | 开启调试器：`true`（`127.0.0.1:9229`）、端口号或 `"host:port"`          |
+| `execArgv`        | `[]`                                   | 应用进程额外的运行时参数                                                |
+| `env`             | `{}`                                   | 应用进程的环境变量，覆盖 shell 与 `.env` 文件                           |
+| `shutdownTimeout` | `1000`                                 | 重启时等待 `app.stop()` 的毫秒数，超时强制结束旧进程                    |
+| `build`           | 见[服务端构建](#服务端构建)            | 生产服务端构建；`false` 只构建前端                                      |
 
 入口所在目录和所有经 Vite 加载的模块始终会被监听。`/api` 匹配 `/api` 和 `/api/users`，不匹配 `/apix`。
 
@@ -361,16 +362,45 @@ node server/main.ts
 
 从源码运行时，Bun 会自动读取 `.env` 文件；Node.js 请使用 `node --env-file-if-exists=.env server/main.ts`。
 
-| `build` 配置 | 默认值             | 说明                                   |
-| ------------ | ------------------ | -------------------------------------- |
-| `entry`      | `"server/main.ts"` | 生产入口，相对 Vite root               |
-| `outDir`     | `"dist/server"`    | 服务端输出目录，不能位于前端输出目录内 |
+| `build` 配置 | 默认值                                     | 说明                                                                           |
+| ------------ | ------------------------------------------ | ------------------------------------------------------------------------------ |
+| `entry`      | `"server/main.ts"`                         | 生产入口，相对 Vite root，或[位于某个包内](#monorepo)                          |
+| `outDir`     | `"dist/server"`                            | 服务端输出目录，不能位于前端输出目录内；`false` 表示服务端以源码形式发布       |
+| `client`     | Vite 的 `build.outDir`，或 `"dist/client"` | 前端输出目录，或 `{ outDir, copyTo }`，额外复制到其他位置                      |
+| `start`      | 运行时 + 构建产物，或运行时 + 入口         | 构建后提示的启动命令（如 `"pnpm --filter @acme/api start"`），cyrenex 只打印它 |
 
-只有在你没有设置前端 `outDir` 时，前端才会改为输出到 `dist/client`；如果服务端输出会落在前端输出目录内（从而被当作静态文件公开），构建会失败。`build: false` 只构建前端。构建使用所配置 `runtime` 的导出条件；服务端相关的 Vite 配置写在 `environments.elysia` 下。
+只有在服务端会被打包、且你没有设置前端 `outDir` 时，前端才会改为输出到 `dist/client`；如果服务端输出会落在前端输出目录内（从而被当作静态文件公开），构建会失败。`build: false` 只构建前端。构建使用所配置 `runtime` 的导出条件；服务端相关的 Vite 配置写在 `environments.elysia` 下。
+
+构建结束后，cyrenex 会打印前端和服务端的输出位置，以及服务端的启动方式。
 
 ### 预览
 
-`vp preview` 会用所配置的运行时启动构建好的 `dist/server/main.mjs`，并把所有请求和 WebSocket 转发给它。前端产物由服务端自己托管，所以预览看到的就是部署后的样子：相同的路由、相同的静态文件、相同的 SPA 回退。它会从预览服务器获得 `PORT` 与 `HOST`，`serve()` 会读取这两个变量。没有服务端构建时，预览只提供前端并给出提示。
+`vp preview` 会用所配置的运行时启动构建好的 `dist/server/main.mjs`（`outDir: false` 时则在入口所在的包内直接运行源码），并把所有请求和 WebSocket 转发给它。前端产物由服务端自己托管，所以预览看到的就是部署后的样子：相同的路由、相同的静态文件、相同的 SPA 回退。它会从预览服务器获得 `PORT` 与 `HOST`，`serve()` 会读取这两个变量。没有服务端入口时，预览只提供前端。
+
+### Monorepo
+
+服务端可以放在单独的 workspace 包中。`entry`、`build.entry` 和 `build.client.copyTo` 既可以是相对 Vite root 的路径，也可以是某个包加上包内路径：
+
+```ts
+// apps/web/vite.config.ts
+cyrenex({
+  entry: { package: "@acme/api", path: "src/app.ts" },
+  build: {
+    entry: { package: "@acme/api", path: "src/main.ts" },
+    outDir: false, // 服务端以源码形式发布，在它自己的包内运行
+    client: { copyTo: { package: "@acme/api", path: "dist" } },
+    start: "pnpm --filter @acme/api start",
+  },
+});
+```
+
+查找包时，先从 Vite root 向上查找 `node_modules`，因此声明过的依赖（`"@acme/api": "workspace:*"`）按安装位置解析；找不到时再扫描 workspace 中的包（`pnpm-workspace.yaml`，或 npm、yarn、bun 的 `package.json` 中的 `workspaces`），无需安装。
+
+- `vp dev` 在服务端包的目录中运行应用，并加载该包的 `.env` 文件。
+- `vp build` 输出前端，把它复制到服务端包内（`serve()` 会在工作目录下找到 `dist`），并提示服务端的启动方式：`cd ../api && bun src/main.ts`，或你设置的 `build.start`。
+- `vp preview` 在服务端包内直接运行入口源码。
+
+Vite root 之外的目录在写入前会被清空，因此 `client` 和 `copyTo` 不接受包的根目录（`../api` 或 `path: "."`），请使用包内的子目录。也可以打包另一个包中的服务端（保留 `outDir`）：它的依赖仍是外部依赖，必须能从存放 `dist/server` 的 web 包中解析到。
 
 ### 静态资源
 

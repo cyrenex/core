@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { createBuilder, preview } from "vite";
 import type { PreviewServer } from "vite";
@@ -18,6 +19,8 @@ import { executableOf, runtimes } from "./runtimes.ts";
 const TMP = join(import.meta.dirname, "../.tmp/build");
 const source = (file: string) =>
   JSON.stringify(join(import.meta.dirname, "../src", file).replaceAll("\\", "/"));
+const sourceUrl = (file: string) =>
+  JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src", file)).href);
 
 const files = {
   "index.html": "<p>web</p>",
@@ -155,7 +158,88 @@ describe.each(runtimes)("server build on %s", { timeout: 60_000 }, (runtime) => 
   });
 });
 
+/** A web app at the root of an npm-style workspace, with the server in package `@acme/api`. */
+const monorepo = {
+  "package.json": JSON.stringify({ name: "web", private: true, workspaces: ["api"] }),
+  "index.html": "<p>web</p>",
+  "api/package.json": JSON.stringify({ name: "@acme/api", type: "module" }),
+  "api/.env": "GREETING=from api",
+  // Run from source: Node.js only imports absolute paths as file URLs.
+  "api/src/app.ts": files["server/app.ts"].replace(source("node.ts"), sourceUrl("node.ts")),
+  "api/src/main.ts": files["server/main.ts"].replace(source("serve.ts"), sourceUrl("serve.ts")),
+};
+
+const monorepoOptions: CyrenexOptions = {
+  entry: { package: "@acme/api", path: "src/app.ts" },
+  build: {
+    entry: { package: "@acme/api", path: "src/main.ts" },
+    outDir: false,
+    client: { copyTo: { package: "@acme/api", path: "dist" } },
+  },
+};
+
+describe.each(runtimes)("monorepo build on %s", { timeout: 60_000 }, (runtime) => {
+  test("ships the server as source and previews it from its package", async () => {
+    const root = await build(monorepo, { ...monorepoOptions, runtime });
+    expect(existsSync(join(root, "dist/index.html"))).toBe(true);
+    // serve() finds the copy under its own working directory.
+    expect(existsSync(join(root, "api/dist/index.html"))).toBe(true);
+    expect(existsSync(join(root, "dist/server"))).toBe(false);
+
+    const server = await preview({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      preview: { port: 0, host: "127.0.0.1" },
+      plugins: [cyrenex({ ...monorepoOptions, runtime })],
+    });
+    previews.push(server);
+    const url = server.resolvedUrls!.local[0]!.replace(/\/$/, "");
+    // Run in the API package: Bun reads its .env (Node.js reads none from source), and serve()
+    // finds the client copy there.
+    const env = (await fetch(`${url}/api/env`).then((r) => r.json())) as Record<string, unknown>;
+    expect(env.runtime).toBe(runtime);
+    expect(env.greeting).toBe(runtime === "bun" ? "from api" : undefined);
+    const page = await fetch(`${url}/deep/link`, { headers: { accept: "text/html" } });
+    expect(await page.text()).toBe("<p>web</p>");
+  });
+});
+
 describe("server build", { timeout: 60_000 }, () => {
+  test("refuses to empty a package root", async () => {
+    await expect(
+      build(monorepo, {
+        ...monorepoOptions,
+        build: { outDir: false, client: { copyTo: { package: "@acme/api", path: "." } } },
+      }),
+    ).rejects.toThrow("is a package root");
+    await expect(build(monorepo, { build: { client: "." } })).rejects.toThrow(
+      "must not contain the project root",
+    );
+  });
+
+  test("prints where the build went and how to start the server", async () => {
+    const lines: string[] = [];
+    const logger = {
+      info: (message: string) => lines.push(message),
+      warn: () => {},
+      warnOnce: () => {},
+      error: () => {},
+      clearScreen: () => {},
+      hasErrorLogged: () => false,
+      hasWarned: false,
+    };
+    await build(monorepo, monorepoOptions, { customLogger: logger, logLevel: "info" });
+    expect(lines).toEqual(
+      expect.arrayContaining([
+        "cyrenex: client → dist",
+        "cyrenex: client → api/dist (copy)",
+        "cyrenex: server ships as source (api/src/main.ts)",
+        "cyrenex: start it with: cd api && node src/main.ts",
+      ]),
+    );
+  });
+
   test("builds only the client without a server entry", async () => {
     const { "server/main.ts": _, ...rest } = files;
     const root = await build(rest);
