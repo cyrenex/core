@@ -6,17 +6,24 @@ import type { Plugin } from "vite";
 
 import { buildPlugin, serverBuildOf } from "./build.ts";
 import { ElysiaEnvironment } from "./environment.ts";
+import { locate } from "./packages.ts";
 import { previewPlugin } from "./preview.ts";
 import { ENVIRONMENT } from "./types.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
-export type { CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
+export type { BuildOptions, CyrenexOptions, Location, RestartEvent, Runtime } from "./types.ts";
+
+const asArray = <T>(value: T | T[] | undefined): T[] =>
+  value === undefined ? [] : Array.isArray(value) ? value : [value];
 
 function resolveOptions(options: CyrenexOptions): ResolvedOptions {
   const runtime = options.runtime ?? (process.env.CYRENEX_RUNTIME as Runtime | undefined) ?? "bun";
   if (runtime !== "bun" && runtime !== "node") {
     throw new TypeError(`cyrenex: unknown runtime "${String(runtime)}", expected "bun" or "node"`);
   }
+  const build = options.build;
+  const input = build ? build.client : undefined;
+  const client = typeof input === "string" ? { outDir: input } : input;
   return {
     entry: options.entry ?? "server/app.ts",
     runtime,
@@ -27,12 +34,14 @@ function resolveOptions(options: CyrenexOptions): ResolvedOptions {
     env: options.env ?? {},
     shutdownTimeout: options.shutdownTimeout ?? 1000,
     build:
-      options.build === false
+      build === false
         ? false
         : {
-            entry: options.build?.entry ?? "server/main.ts",
-            outDir: options.build?.outDir ?? "dist/server",
-            auto: options.build?.entry === undefined,
+            entry: build?.entry ?? "server/main.ts",
+            outDir: build?.outDir ?? "dist/server",
+            auto: build?.entry === undefined,
+            client: { outDir: client?.outDir, copyTo: asArray(client?.copyTo) },
+            start: build?.start,
           },
   };
 }
@@ -71,7 +80,7 @@ function dtsPlugin(options: ResolvedOptions): Plugin {
     configResolved(config) {
       if (options.dts === false) return;
       const file = resolve(config.root, options.dts);
-      const content = renderDts(file, resolve(config.root, options.entry));
+      const content = renderDts(file, locate(config.root, options.entry));
       if (existsSync(file) && readFileSync(file, "utf8") === content) return;
       writeFileSync(file, content);
     },

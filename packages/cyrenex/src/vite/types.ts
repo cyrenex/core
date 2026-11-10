@@ -15,12 +15,21 @@ export interface RestartEvent {
 /** Runtime executable used to launch the isolated application process. */
 export type Runtime = "node" | "bun";
 
+/**
+ * A file or directory: a path relative to Vite root, or a path inside a workspace package,
+ * `{ package: "@acme/api", path: "src/app.ts" }`. The package is found in `node_modules` up from
+ * Vite root, else among the packages of the workspace, so it needs no install.
+ */
+export type Location = string | { package: string; path: string };
+
 export interface CyrenexOptions {
   /**
    * Module default-exporting the Elysia app (without calling `.listen()`), relative to Vite root.
+   * In a monorepo it may live in another package: the app then runs in that package's
+   * directory, with its `.env` files.
    * @default "server/app.ts"
    */
-  entry?: string;
+  entry?: Location;
 
   /**
    * Child process runtime, independent of the runtime running Vite.
@@ -78,17 +87,46 @@ export interface CyrenexOptions {
   shutdownTimeout?: number;
 
   /**
-   * Build the production server with `vp build`: `entry` (your `serve(app)` module, relative
-   * to Vite root) is bundled to `outDir/main.mjs`, and the client build moves to `dist/client`
-   * unless you set its `outDir`. Dependencies stay external, as in Vite's SSR builds.
-   * Enabled by default when `server/main.ts` exists; `false` builds the client only.
+   * What `vp build` produces. `false` leaves the build to Vite (the client only).
    * @default { entry: "server/main.ts", outDir: "dist/server" }
    */
-  build?: false | { entry?: string; outDir?: string };
+  build?: false | BuildOptions;
+}
+
+export interface BuildOptions {
+  /**
+   * Your production entry (the `serve(app)` module), relative to Vite root or in another
+   * package of a monorepo. Enabled by default when `server/main.ts` exists.
+   * @default "server/main.ts"
+   */
+  entry?: Location;
+
+  /**
+   * Bundle `entry` to `outDir/main.mjs`, runnable with `node` or `bun`; dependencies stay
+   * external, as in Vite's SSR builds. The client build then defaults to `dist/client`.
+   * `false` ships the server as source (`bun server/main.ts`, or a build of your own).
+   * @default "dist/server"
+   */
+  outDir?: string | false;
+
+  /**
+   * Where the client build goes: a directory (relative to Vite root, possibly in the server's
+   * package of a monorepo), or a directory plus copies of it. Directories outside Vite root
+   * are emptied first, so they must not be a package root.
+   * @default Vite's `build.outDir`, or "dist/client" when the server is bundled
+   */
+  client?: string | { outDir?: string; copyTo?: Location | Location[] };
+
+  /**
+   * How you start the server, shown after building: `"pnpm start"`,
+   * `"pnpm --filter @acme/api start"`… cyrenex only prints it.
+   * @default the runtime on the built server, or on the entry when it ships as source
+   */
+  start?: string;
 }
 
 export interface ResolvedOptions {
-  entry: string;
+  entry: Location;
   runtime: Runtime;
   routes: string[] | "auto";
   watch: false | string[];
@@ -96,8 +134,17 @@ export interface ResolvedOptions {
   execArgv: string[];
   env: Record<string, string>;
   shutdownTimeout: number;
-  /** `auto`: defaulted, so skipped when the entry does not exist. */
-  build: false | { entry: string; outDir: string; auto: boolean };
+  build:
+    | false
+    | {
+        entry: Location;
+        /** `false`: the server ships as source. */
+        outDir: string | false;
+        /** `auto`: defaulted, so skipped when the entry does not exist. */
+        auto: boolean;
+        client: { outDir: string | undefined; copyTo: Location[] };
+        start: string | undefined;
+      };
 }
 
 /** Bootstrap data serialized by env-runner and delivered to the child over IPC. */

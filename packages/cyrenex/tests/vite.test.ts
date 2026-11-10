@@ -166,6 +166,25 @@ describe.each(runtimes)("cyrenex/vite on %s", { timeout: 30_000 }, (runtime) => 
     expect(await json(`${url}/api/env`)).toEqual(["base", "mode"]);
   });
 
+  test("runs an app of another workspace package in its directory, with its .env", async () => {
+    const { url, root } = await start(
+      {
+        "package.json": JSON.stringify({ name: "web", private: true, workspaces: ["api"] }),
+        ".env": "A=web",
+        "api/package.json": JSON.stringify({ name: "@acme/api" }),
+        "api/.env": "A=api",
+        "api/src/app.ts": app("api", `.get("/api/where", () => [process.env.A, process.cwd()])`),
+      },
+      { entry: { package: "@acme/api", path: "src/app.ts" } },
+    );
+    const [a, cwd] = (await json(`${url}/api/where`)) as unknown as [string, string];
+    expect(a).toBe("api");
+    expect(cwd.replaceAll("\\", "/")).toBe(join(root, "api").replaceAll("\\", "/"));
+    expect(readFileSync(join(root, "cyrenex-env.d.ts"), "utf8")).toContain(
+      'typeof import("./api/src/app.ts").default',
+    );
+  });
+
   test("passes env, runtime flags and the inspector to the app process", async () => {
     const { url } = await start(
       {
