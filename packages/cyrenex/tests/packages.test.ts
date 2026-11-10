@@ -50,45 +50,14 @@ describe("locate", () => {
     expect(locate(web, { package: "@acme/api", path: "src/main.ts" })).toBe(`${api}/src/main.ts`);
   });
 
-  test("finds a package of a pnpm workspace without installing", () => {
+  test("does not find a workspace package that is not installed", () => {
     const root = tree({
-      "pnpm-workspace.yaml": [
-        "# the workspace",
-        "packages:",
-        '  - "apps/*"',
-        "  - 'libs/**' # nested",
-        "  - '!libs/**/fixtures/**'",
-        "catalog:",
-        "  vite: ^8.0.0",
-      ].join("\n"),
+      "pnpm-workspace.yaml": "packages:\n  - apps/*\n",
       "apps/web/package.json": manifest("web"),
       "apps/api/package.json": manifest("@acme/api"),
-      "libs/core/db/package.json": manifest("@acme/db"),
-      "libs/core/fixtures/db/package.json": manifest("@acme/fixture"),
     });
-    const web = join(root, "apps/web");
-    expect(packageDir(web, "@acme/api")).toBe(normalize(join(root, "apps/api")));
-    expect(packageDir(web, "@acme/db")).toBe(normalize(join(root, "libs/core/db")));
-    expect(() => packageDir(web, "@acme/fixture")).toThrow("was not found");
-  });
-
-  test("finds a package of an npm, yarn or bun workspace without installing", () => {
-    for (const workspaces of [["packages/*"], { packages: ["packages/*"] }]) {
-      const root = tree({
-        "package.json": JSON.stringify({ private: true, workspaces }),
-        "packages/web/package.json": manifest("web"),
-        "packages/api/package.json": manifest("api"),
-      });
-      expect(packageDir(join(root, "packages/web"), "api")).toBe(
-        normalize(join(root, "packages/api")),
-      );
-    }
-  });
-
-  test("says where it looked for a package it cannot find", () => {
-    const root = tree({ "pnpm-workspace.yaml": "packages:\n  - apps/*\n", "apps/web/x": "" });
-    expect(() => locate(join(root, "apps/web"), { package: "@acme/missing", path: "a" })).toThrow(
-      'package "@acme/missing" was not found',
+    expect(() => locate(join(root, "apps/web"), { package: "@acme/api", path: "a" })).toThrow(
+      'package "@acme/api" was not found in node_modules',
     );
   });
 });

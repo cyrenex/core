@@ -394,7 +394,7 @@ cyrenex({
 });
 ```
 
-查找包时，先从 Vite root 向上查找 `node_modules`，因此声明过的依赖（`"@acme/api": "workspace:*"`）按安装位置解析；找不到时再扫描 workspace 中的包（`pnpm-workspace.yaml`，或 npm、yarn、bun 的 `package.json` 中的 `workspaces`），无需安装。
+查找包时，和普通导入一样从 Vite root 向上查找 `node_modules`，因此需要在 web 包中声明依赖（`"@acme/api": "workspace:*"`）并安装。
 
 - `vp dev` 在服务端包的目录中运行应用，并加载该包的 `.env` 文件。
 - `vp build` 输出前端，把它复制到服务端包内（`serve()` 会在工作目录下找到 `dist`），并提示服务端的启动方式：`cd ../api && bun src/main.ts`，或你设置的 `build.start`。

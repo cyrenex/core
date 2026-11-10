@@ -394,7 +394,7 @@ cyrenex({
 });
 ```
 
-A package is looked up in `node_modules` up from Vite root, so a declared dependency (`"@acme/api": "workspace:*"`) is found as installed; otherwise among the packages of the workspace (`pnpm-workspace.yaml`, or `workspaces` in `package.json` for npm, yarn and bun), without installing.
+A package is looked up in `node_modules` up from Vite root, like any import, so declare it as a dependency of the web package (`"@acme/api": "workspace:*"`) and install.
 
 - `vp dev` runs the app in the server package's directory, with that package's `.env` files.
 - `vp build` writes the client, copies it into the server package (where `serve()` finds `dist` under its working directory), and prints how to start the server: `cd ../api && bun src/main.ts`, or your `build.start`.

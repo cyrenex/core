@@ -2,7 +2,7 @@
 // Node.js and Bun.
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -69,7 +69,10 @@ async function build(
   const root = join(TMP, Math.random().toString(36).slice(2));
   for (const [file, content] of Object.entries(fixture)) {
     mkdirSync(join(root, file, ".."), { recursive: true });
-    writeFileSync(join(root, file), content);
+    // `link:<dir>`: an installed workspace package. A junction on Windows, like pnpm's links.
+    if (content.startsWith("link:"))
+      symlinkSync(join(root, content.slice(5)), join(root, file), "junction");
+    else writeFileSync(join(root, file), content);
   }
   const builder = await createBuilder(
     {
@@ -158,11 +161,12 @@ describe.each(runtimes)("server build on %s", { timeout: 60_000 }, (runtime) => 
   });
 });
 
-/** A web app at the root of an npm-style workspace, with the server in package `@acme/api`. */
+/** A web app at the root of a workspace, with the server in the installed package `@acme/api`. */
 const monorepo = {
   "package.json": JSON.stringify({ name: "web", private: true, workspaces: ["api"] }),
   "index.html": "<p>web</p>",
   "api/package.json": JSON.stringify({ name: "@acme/api", type: "module" }),
+  "node_modules/@acme/api": "link:api",
   "api/.env": "GREETING=from api",
   // Run from source: Node.js only imports absolute paths as file URLs.
   "api/src/app.ts": files["server/app.ts"].replace(source("node.ts"), sourceUrl("node.ts")),

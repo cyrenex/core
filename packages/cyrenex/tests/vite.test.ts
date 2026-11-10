@@ -1,6 +1,6 @@
 // The dev plugin end to end: a real Vite dev server running a fixture app in a Node.js or Bun
 // child.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 
@@ -54,7 +54,10 @@ async function launch(
   const root = join(TMP, Math.random().toString(36).slice(2));
   const write = (file: string, content: string) => {
     mkdirSync(join(root, file, ".."), { recursive: true });
-    writeFileSync(join(root, file), content);
+    // `link:<dir>`: an installed workspace package. A junction on Windows, like pnpm's links.
+    if (content.startsWith("link:"))
+      symlinkSync(join(root, content.slice(5)), join(root, file), "junction");
+    else writeFileSync(join(root, file), content);
   };
   for (const [file, content] of Object.entries({ "index.html": "<p>web</p>", ...files })) {
     write(file, content);
@@ -172,6 +175,7 @@ describe.each(runtimes)("cyrenex/vite on %s", { timeout: 30_000 }, (runtime) => 
         "package.json": JSON.stringify({ name: "web", private: true, workspaces: ["api"] }),
         ".env": "A=web",
         "api/package.json": JSON.stringify({ name: "@acme/api" }),
+        "node_modules/@acme/api": "link:api",
         "api/.env": "A=api",
         "api/src/app.ts": app("api", `.get("/api/where", () => [process.env.A, process.cwd()])`),
       },

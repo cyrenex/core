@@ -18,7 +18,7 @@ export type Runtime = "node" | "bun";
 /**
  * A file or directory: a path relative to Vite root, or a path inside a workspace package,
  * `{ package: "@acme/api", path: "src/app.ts" }`. The package is found in `node_modules` up from
- * Vite root, else among the packages of the workspace, so it needs no install.
+ * Vite root, so it must be an installed dependency (`"@acme/api": "workspace:*"`).
  */
 export type Location = string | { package: string; path: string };
 
