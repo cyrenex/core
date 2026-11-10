@@ -11,6 +11,8 @@ catalog:
   "@elysia/eden": ^1.4.10
   "@elysia/node": ^1.4.6
   "@elysia/static": ^1.4.11
+  "@orpc/client": 2.0.0-beta.50
+  "@orpc/server": 2.0.0-beta.50
   "@types/bun": ^1.4.4
   "@types/node": ^26.6.6
   elysia: ^1.4.30
@@ -79,3 +81,14 @@ minimumReleaseAgeExclude:
   - oxfmt@0.76.0
   - oxlint@1.91.0
   - vite-plus@1.5.0
+  - "@orpc/client@2.0.0-beta.50"
+  - "@orpc/contract@2.0.0-beta.50"
+  - "@orpc/server@2.0.0-beta.50"
+  - "@orpc/shared@2.0.0-beta.50"
+  - "@standard-server/aws-lambda@0.16.0"
+  - "@standard-server/core@0.16.0"
+  - "@standard-server/fastify@0.16.0"
+  - "@standard-server/fetch@0.16.0"
+  - "@standard-server/node@0.16.0"
+  - "@standard-server/peer@0.16.0"
+  - "@standard-server/shared@0.16.0"

@@ -1,6 +1,6 @@
 <h1 align="center">cyrenex</h1>
 
-<p align="center">在 Vite 里开发全栈 Elysia。依赖注入交给 <a href="https://github.com/cyrenex/pondi">pondi</a>，端到端类型交给 <a href="https://elysiajs.com/eden/overview">Eden</a>。</p>
+<p align="center">在 Vite 里开发全栈服务端应用。依赖注入交给 <a href="https://github.com/cyrenex/pondi">pondi</a>，从开发到生产只用一个服务端入口。</p>
 
 <p align="center">
   <a href="https://github.com/cyrenex/core/blob/master/README.md">English</a> · 简体中文 · <a href="https://www.npmjs.com/package/cyrenex">npm</a> · <a href="https://github.com/cyrenex/core/tree/master/playground">Playground</a>
@@ -13,48 +13,33 @@
 </p>
 
 > [!NOTE]
-> 一条 `vp dev`，前端和 Elysia API 同源访问。API 跑在独立的 Bun 或 Node.js 进程里，文件变更即重启，退出前释放所有资源。
+> 一条 `vp dev`，前端和 API 同源访问。API 跑在独立的 Bun 或 Node.js 进程里，文件变更即重启，退出前释放所有资源。
 
-搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个与框架无关的核心，加上每个框架各自的适配器（目前是 Elysia）：
+搭一个 TypeScript 全栈应用，通常意味着两个开发服务器、一层代理、一个自己拼的容器，再加一个要手动保持同步的客户端。cyrenex 把这些收进一个与框架无关的核心，再配上你所用服务端框架的适配器：
 
-| 包 / 入口                | 在哪里用          | 内容                                                            |
-| ------------------------ | ----------------- | --------------------------------------------------------------- |
-| `cyrenex`                | 服务端            | pondi 的全部 API、`warmup`、`dispose`                           |
-| `cyrenex/start`          | 服务端            | `start(app)`：预热、静态资源、监听与优雅退出                    |
-| `cyrenex/testing`        | 测试              | `override(app, ...)` 替换已导出应用的 provider                  |
-| `cyrenex/vite`           | `vite.config.ts`  | 在子进程中运行 `server/main.ts`，转发 `/api` 与 `/ws`，负责构建 |
-| `cyrenex/client`         | 浏览器            | `type App`，`treaty<App>()` 不再需要 `../server/app` 这样的导入 |
-| `cyrenex/adapter`        | 适配器            | 编写框架适配器所需的基础能力：挂载 Pond、请求作用域             |
-| `@cyrenex/elysia`        | 服务端            | Elysia 的 `pondi`、`inject`、`RequestContext`、`start`          |
-| `@cyrenex/elysia/node`   | 服务端（Node.js） | 包装 `@elysia/node`，修复了 `app.stop()` 的 adapter             |
-| `@cyrenex/elysia/static` | 服务端            | 带 Vite 默认值与 SPA 回退的 `@elysia/static`                    |
+- **Elysia**：[`@cyrenex/elysia`](https://github.com/cyrenex/core/blob/master/packages/elysia/README.zh-CN.md)，支持 Eden 类型与 WebSocket。
+- **oRPC**：[`@cyrenex/orpc`](https://github.com/cyrenex/core/blob/master/packages/orpc/README.zh-CN.md)，以 oRPC 中间件的形式注入，请求作用域对流式输出安全。
 
 ## 特性
 
 - **开发期同源**：前端资源和 HMR 由 Vite 处理，匹配的 HTTP 请求与 WebSocket upgrade 转发给应用。
 - **真实运行时、真实重启**：应用运行在独立的 Bun 或 Node.js 进程，通过 Vite ModuleRunner 加载，文件变更时整体替换。
-- **处处同一个入口**：`server/main.ts` 用 `start(app)` 启动应用，`vp dev`、`vp preview` 和生产环境都运行它；开发服务器只负责代理。
+- **处处同一个入口**：`server/main.ts` 负责启动应用，`vp dev`、`vp preview` 和生产环境都运行它；开发服务器只负责代理。
 - **干净的重启**：每次重启都会关闭服务器并释放 Pond，按依赖逆序关闭连接。
-- **类型化注入**：`inject({ users: UserService })` 把解析好的服务放进 handler 上下文，类型自动推导。
-- **请求作用域**：用到注入的请求会得到自己的 `pond.fork()`，响应结束后释放，WebSocket 则在连接关闭时释放；没有注入的路由零开销。
+- **请求作用域**：为请求解析的服务来自它自己的 `pond.fork()`，响应结束后释放。
 - **启动时失败，而不是第一个请求时**：`eager` 中的 singleton 会在应用开始监听之前创建，开发和生产环境都是如此。
-- **可读的 DI 错误**：`PondError` 在开发环境会变成带 code 和依赖路径的 500 响应，生产环境只返回普通 500。
-- **原生 Elysia**：没有应用工厂。应用由你创建、adapter 由你传入，再 `.use(pondi(pond))` 即可。
-- **Eden 免路径**：自动生成的 `cyrenex-env.d.ts` 注册应用类型，浏览器直接从 `cyrenex/client` 导入。
-- **生产环境同一份源码**：同一个入口可在 Bun 和 Node.js 上运行，构建后或直接从源码运行均可；`start()` 托管前端产物并处理 SPA 回退。
+- **类型化客户端免路径**：自动生成的 `cyrenex-env.d.ts` 注册应用类型，浏览器直接从 `cyrenex/client` 导入。
+- **生产环境同一份源码**：同一个入口可在 Bun 和 Node.js 上运行，构建后或直接从源码运行均可，并托管前端产物、处理 SPA 回退。
 - **适配 monorepo**：服务端入口可以放在其他包里，前端产物可以直接输出或复制到那个包。
 
 ## 安装
 
 ```bash
-pnpm add cyrenex @cyrenex/elysia elysia @elysia/eden
+pnpm add cyrenex
 pnpm add -D vite-plus
-
-# 使用 Node.js 运行时（通过 @cyrenex/elysia/node 使用）
-pnpm add @elysia/node
 ```
 
-需要 Node.js 22.18+ 和 Vite 8（或 Vite+）。默认运行时是 Bun，需要能在 `PATH` 中找到。
+再安装你所用框架的适配器，例如 [`@cyrenex/elysia`](https://github.com/cyrenex/core/blob/master/packages/elysia/README.zh-CN.md#安装)。需要 Node.js 22.18+ 和 Vite 8（或 Vite+）。默认运行时是 Bun，需要能在 `PATH` 中找到。
 
 ## 快速开始
 
@@ -68,11 +53,10 @@ export default defineConfig({
 });
 ```
 
-用 pondi 描述服务：
+用 pondi 描述服务，`cyrenex` 会重新导出 pondi 的全部 API：
 
 ```ts
 // server/services.ts
-import { RequestContext } from "@cyrenex/elysia";
 import { pebble, ripple } from "cyrenex";
 
 export const Config = pebble<{ greeting: string }>("app:config");
@@ -85,51 +69,13 @@ export const Db = ripple("db", async () => {
 export const UserService = ripple("user:service", [Db], (db) => ({
   list: () => db.pool.query("select * from users"),
 }));
-
-// 每个请求一个实例
-export const CurrentUser = ripple(
-  "user:current",
-  [RequestContext],
-  (ctx) => ({ name: ctx.request.headers.get("x-user") ?? "guest" }),
-  { mode: "scoped" },
-);
 ```
 
-用 `pondi` 挂上 Pond，把服务注入路由，导出应用，**不要**调用 `.listen()`：
-
-```ts
-// server/app.ts
-import { inject, pondi } from "@cyrenex/elysia";
-import { Pond, ripple } from "cyrenex";
-import { Elysia } from "elysia";
-import { Config, CurrentUser, UserService } from "./services.ts";
-
-const pond = new Pond().use(ripple(Config, () => ({ greeting: "Hello" })));
-
-export default new Elysia()
-  .use(pondi(pond))
-  .use(inject({ users: UserService, me: CurrentUser }))
-  .get("/api/users", ({ users }) => users.list())
-  .get("/api/me", ({ me }) => me);
-```
-
-在浏览器中使用官方 Eden 调用：
-
-```ts
-// web/api.ts
-import { treaty } from "@elysia/eden";
-import type { App } from "cyrenex/client";
-
-export const api = treaty<App>(location.origin);
-
-const { data } = await api.api.me.get(); // { name: string } | null
-```
-
-在服务端入口里启动它。`vp dev` 会运行这个文件，并把 `/api` 和 `/ws` 转发给它；`vp build` 会把它打包用于生产：
+在 `server/app.ts` 里用框架的适配器搭建应用（见 [Elysia](https://github.com/cyrenex/core/blob/master/packages/elysia/README.zh-CN.md#快速开始)），然后在服务端入口里启动它。`vp dev` 会运行这个文件，并把 `/api` 和 `/ws` 转发给它；`vp build` 会把它打包用于生产：
 
 ```ts
 // server/main.ts
-import { start } from "@cyrenex/elysia";
+import { start } from "@cyrenex/elysia"; // 任何带 `fetch` 的应用也可以用 "cyrenex/start"
 import app from "./app.ts";
 
 await start(app);
@@ -139,75 +85,17 @@ await start(app);
 vp dev
 ```
 
-## 注入
+## 服务
 
-`inject` 接收一个 token 映射，在 handler 执行前完成解析。token 可以是 ripple、pebble 或字符串 key，与 pondi 完全一致。
+服务就是 pondi 的 ripple，由适配器为每个请求解析。mode 决定它们的生命周期：
 
-```ts
-export const userRoutes = new Elysia({ prefix: "/api/users" })
-  .use(inject({ users: UserService, me: CurrentUser }))
-  .get("/", ({ users }) => users.list())
-  .get("/me", ({ me }) => me);
-```
+| mode        | 实例所在               | 释放时机                                   |
+| ----------- | ---------------------- | ------------------------------------------ |
+| `singleton` | 根 Pond                | 服务器停止时（`stop()`、信号、开发期重启） |
+| `scoped`    | 请求的 `pond.fork()`   | 响应结束后，出错也会释放                   |
+| `transient` | 不缓存，每次解析都新建 | 随请求作用域释放                           |
 
-路由模块仍是普通的 Elysia 实例，`typeof app` 对 Eden 来说完全静态。Pond 在请求时从应用上获取，因此测试时可以整体替换。
-
-### 请求作用域
-
-| mode        | 实例所在               | 释放时机                                             |
-| ----------- | ---------------------- | ---------------------------------------------------- |
-| `singleton` | 根 Pond                | 服务器停止时（`stop()`、信号、开发期重启）           |
-| `scoped`    | 请求的 `pond.fork()`   | 响应结束后，出错也会释放；WebSocket 在连接关闭时释放 |
-| `transient` | 不缓存，每次解析都新建 | 随请求作用域释放                                     |
-
-`RequestContext` 是当前请求的 Elysia 上下文。它在每个请求 fork 中以 `scoped` 注册，所以 singleton 依赖它时会抛出 `CAPTIVE_DEPENDENCY`，而不是把某个用户的数据缓存给所有人。
-
-fork 是按需创建的：没有使用 `inject` 的路由完全不会碰到容器。
-
-`pondi(pond)` 要用在根应用上，并放在路由之前。它会在上下文中挂上 `pond`，并注册创建、释放请求作用域的钩子。
-
-### WebSocket
-
-在 WebSocket 路由中，注入的值位于 `ws.data`，作用域与连接同生命周期：每条消息拿到的都是同一批实例，并在你的 `close` handler 执行后释放。如果升级被拒绝（钩子或 handler 返回错误状态），作用域会随响应一起释放。
-
-```ts
-const Session = ripple("session", [RequestContext], (ctx) => openSession(ctx.headers), {
-  mode: "scoped",
-});
-
-app.use(inject({ session: Session })).ws("/ws", {
-  message(ws, message) {
-    ws.data.session.track(message);
-  },
-});
-```
-
-### 预热 singleton
-
-singleton 默认在第一次使用时才创建。可以把必须在接收流量前就绪的那些列出来：
-
-```ts
-new Elysia().use(pondi(pond, { eager: [Db, Cache] }));
-```
-
-`start()` 会在开始监听之前创建它们，开发和生产环境都是如此；如果使用自己的监听方式，请在 `.listen()` 之前 `await warmup(app)`。任何一个失败（数据库拒绝连接、缺少实现、循环依赖），启动都会带着错误和依赖路径失败，已经创建的实例会被释放：开发服务器记录错误并在下次文件变更时重试，生产入口则带着错误退出。
-
-只接受 singleton。没有调用 `warmup(app)` 时，`onStart` 钩子仍会创建它们，但无法阻止启动，失败时只会记录日志。
-
-### 错误
-
-解析过程中抛出的 `PondError`（缺少实现、循环依赖、captive dependency）会变成 500 响应：
-
-```json
-{
-  "error": "PondError",
-  "code": "MISSING_PROVIDER",
-  "message": "No provider for \"app:config\" (db -> app:config)",
-  "path": ["db", "app:config"]
-}
-```
-
-`NODE_ENV` 为 `production` 时隐藏细节并改为写日志，可以通过 `pondi(pond, { exposeErrors })` 覆盖。其他错误仍交给 Elysia 处理。
+fork 是按需创建的：没有解析任何服务的请求完全不会碰到容器。`warmup(app)` 创建应用的 `eager` singleton，`dispose(app)` 释放它的 Pond；`start` 会替你调用这两者。
 
 ## 客户端类型
 
@@ -231,40 +119,32 @@ declare module "vite/types/customEvent.d.ts" {
 export {};
 ```
 
-建议提交到仓库并加入 `tsconfig.json` 的 `include`，这样新 clone 的项目在启动开发服务器之前就能通过类型检查。可以用 `dts` 修改位置，或用 `dts: false` 关闭生成并自行编写声明。
+之后 `cyrenex/client` 的 `App` 就是你的应用类型，可以交给框架的类型化客户端使用（Eden 的 `treaty<App>()`）。声明不存在时它是 `unknown`，所以建议提交到仓库并加入 `tsconfig.json` 的 `include`，这样新 clone 的项目在启动开发服务器之前就能通过类型检查。可以用 `dts` 修改位置，或用 `dts: false` 关闭生成并自行编写声明。
 
 > [!TIP]
 > 浏览器端只导入了类型，服务端代码在构建时被擦除，不会进入前端产物。但前端的 `tsconfig.json` 仍需要服务端用到的类型（例如 `@types/node`）。
 
 ## 测试
 
-直接测试模块导出的应用，通过 Eden 调用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放，在 Vitest 与 `bun test` 中用法相同：
+直接测试模块导出的应用，不经过网络。`cyrenex/testing` 的 `override` 会替换 provider，直到被释放，在 Vitest 与 `bun test` 中用法相同：
 
 ```ts
-import { treaty } from "@elysia/eden";
 import { ripple } from "cyrenex";
 import { override } from "cyrenex/testing";
 import app from "../server/app.ts";
 import { Db } from "../server/services.ts";
-
-const api = treaty(app);
 
 test("lists users", async () => {
   await using _ = override(
     app,
     ripple(Db, () => fakeDb),
   );
-  expect((await api.api.users.get()).data).toEqual([]);
+  const response = await app.fetch(new Request("http://localhost/api/users"));
+  expect(await response.json()).toEqual([]);
 });
 ```
 
 请求会从应用 Pond 的一个 fork 中解析，这个 fork 遮蔽了传入的 ripple：依赖它们的单例（依赖 `Db` 的 `UserService`）会在 fork 中重新创建，真实实例不受影响，恢复时 fork 会被释放。override 可以嵌套，按相反顺序恢复。它作用于该应用的所有请求，所以不要并发运行同一个应用的 override 测试。
-
-只想单独测试某个路由模块时，可以用 fork 出的 Pond 搭一个小应用：
-
-```ts
-const app = new Elysia().use(pondi(pond.fork().use(ripple(Db, () => fakeDb)))).use(userRoutes);
-```
 
 ## Vite 插件
 
@@ -313,7 +193,7 @@ cyrenex({
 ### 重启
 
 - 文件变更以 100ms 去抖并进入串行队列，重启期间到达的请求会等待新进程就绪。
-- 旧进程收到关闭消息后，关闭 `start()` 启动的服务器（会执行 Elysia 的 `onStop` 钩子）并释放 Pond，超过 `shutdownTimeout`（默认 1 秒）会被强制结束。
+- 旧进程收到关闭消息后，关闭 `start()` 启动的服务器并释放 Pond，超过 `shutdownTimeout`（默认 1 秒）会被强制结束。
 - 应用不可用时 HTTP 返回 `503`，转发异常返回 `502`。
 - 重启会断开业务 WebSocket，客户端需在 `close` 时自行重连；Vite 的 HMR 连接不受影响。
 - 每次重启后，页面会收到 `cyrenex:restart` HMR 事件，类型由 `cyrenex-env.d.ts` 提供：
@@ -350,25 +230,21 @@ bun server/main.ts           # 或直接运行源码
 node server/main.ts
 ```
 
-`@cyrenex/elysia` 的 `start`（对任何带 `fetch` 的应用，也可以用 `cyrenex/start` 的 `start`）依次完成服务端入口都需要做的事：
+`start(app, options?)` 依次完成服务端入口都需要做的事：
 
 1. 创建 `eager` 中的 singleton（`warmup(app)`），失败则在监听之前 reject。
-2. 监听 `PORT`（默认 `3000`）与 `HOST`，或 `port`、`hostname` 选项：`@cyrenex/elysia` 用 Elysia 自己的 adapter，`cyrenex/start` 用 srvx 承载 `fetch`。传入 `listen` 可以换成其他服务器。
+2. 监听 `PORT`（默认 `3000`）与 `HOST`，或 `port`、`hostname` 选项。
 3. 在你的路由之后托管前端产物，并提供 SPA 回退。在 `vp dev` 下不托管任何文件，前端由 Vite 提供。
 4. 收到 `SIGINT` / `SIGTERM` 时关闭服务器并释放 Pond，然后退出。传入 `signals: false` 可自行处理信号。
 
 它返回 `{ port, url, stop }`。在 `vp dev` 和 `vp preview` 下，它会监听开发或预览服务器转发的目标端口，并把重启交给它们处理。
 
-### 监听方式
-
-`@cyrenex/elysia` 的 `start` 会等待 Elysia 的异步插件注册完成，用应用自己的 adapter 监听（所以 WebSocket、`onStart` / `onStop` 和 handler 里的 `server` 都能用），用前端产物响应没有匹配到路由的请求，并在 `close` 时停止应用；在 Bun 上也会等待 `onStop` 钩子执行完毕。
-
-`cyrenex/start` 的 `start` 只需要 `app.fetch`，而 fetch 不支持 WebSocket。需要其他服务器时，传入一个 `listen` 函数，由它启动服务器并返回端口和 `close`：
+适配器导出的 `start` 会用框架自己的服务器监听（所以 WebSocket 可用）。`cyrenex/start` 的 `start` 在 Node.js 和 Bun 上用 srvx 承载任意应用的 `fetch`；fetch 不支持 WebSocket，需要其他服务器时，传入 `listen`，由它启动服务器并返回端口和 `close`：
 
 ```ts
 import { start } from "cyrenex/start";
 
-// 任何接受 fetch handler 的服务器；传入的 `fetch` 已经带上了前端产物的回退。
+// 传入的 `fetch` 已经带上了前端产物的回退。
 await start(app, {
   listen: ({ port, hostname, fetch }) => {
     const server = Bun.serve({ port, hostname, fetch, websocket });
@@ -423,57 +299,47 @@ await start(app, { static: new URL("./public", import.meta.url) });
 
 以源码形式运行的服务端不经过 Vite：在 `vp dev` 下能用的别名、`import.meta.env` 等 Vite 专有特性，它都用不了。
 
+> [!TIP]
+> Node.js 通过剥离类型来运行 TypeScript，所以开启 `erasableSyntaxOnly` 并使用显式的 `.ts` 扩展名，同一份源码就能不经构建在两种运行时上运行。
+
 ### Monorepo
 
-服务端可以放在独立的包里。把 `server`（以及用于客户端类型的 `app`）指向它，再把前端输出到那个包，或者复制过去：
+服务端可以放在独立的包里。把 `server`（以及用于客户端类型的 `app`）指向它，再把前端输出到那个包，或者复制过去。这几个选项既可以写相对 Vite root 的路径，也可以写包名加包内路径：
 
 ```ts
 // apps/web/vite.config.ts
 cyrenex({
-  server: "../api/src/main.ts",
-  app: "../api/src/app.ts",
-  build: { server: false, client: { outDir: "dist", copyTo: "../api/public" } },
+  server: { package: "@acme/api", path: "src/main.ts" },
+  app: { package: "@acme/api", path: "src/app.ts" },
+  build: {
+    server: false,
+    client: { outDir: "dist", copyTo: { package: "@acme/api", path: "public" } },
+  },
 });
 ```
+
+包会先从 Vite root 开始逐级向上在 `node_modules` 中查找，所以声明为依赖（`"@acme/api": "workspace:*"`）并安装后就能找到；找不到时再在 workspace 的包中查找（`pnpm-workspace.yaml`，或 npm、yarn、bun 的 `package.json` 中的 `workspaces`），无需安装。
 
 - `vp dev` 在服务端包的目录下运行入口，并读取那个包的 `.env` 文件。
 - `vp build` 输出前端、完成复制，并打印启动服务端的命令：默认是 `cd ../api && bun src/main.ts`，也可以用 `build.start: "pnpm --filter @acme/api start"` 换成你自己的命令。cyrenex 只负责打印。
 - `vp preview` 在那个包里直接运行源码入口。
 
-Vite root 之外的目录会在写入前被清空，所以 `client` 和 `copyTo` 不接受包的根目录（`../api`），请使用包内的子目录（`../api/public`）。
+Vite root 之外的目录会在写入前被清空，所以 `client` 和 `copyTo` 不接受包的根目录（`../api`，或 `path: "."`），请使用包内的子目录（`public`）。
 
 ### 预览
 
 `vp preview` 会用所配置的运行时启动服务端（`dist/server/main.mjs`，以源码部署时则是入口本身），并把所有请求和 WebSocket 转发给它。前端产物由服务端自己托管，所以预览看到的就是部署后的样子：相同的路由、相同的静态文件、相同的 SPA 回退。`start()` 会把端口报告给预览服务器；其他服务器则从预览服务器获得 `PORT` 与 `HOST`。没有服务端时，预览只提供前端。
 
-> [!TIP]
-> Node.js 通过剥离类型来运行 TypeScript，所以开启 `erasableSyntaxOnly` 并使用显式的 `.ts` 扩展名，同一份源码就能不经构建在两种运行时上运行。
+## 编写适配器
 
-`@cyrenex/elysia/static` 仍然保留，供需要自行给 Elysia 添加静态文件的应用使用：它包装了 `@elysia/static`（需自行安装），提供适合 Vite 的默认值（`assets: "dist"`、`prefix: "/"`）和同样的 SPA 回退。
+`cyrenex/adapter` 提供框架适配器所需的基础能力，让 `start`、`warmup`、`dispose` 和 `override` 都能作用于该框架的应用：
 
-## Adapter
+- `attach(app, pond, { eager })` 把 Pond 及其预热挂到应用上。
+- `scopeOf(request, pond, setup)` 返回请求自己的 fork，首次使用时创建；`release(request)` 立即释放它，`releaseAfter(request, response)` 则在响应体发送完毕后释放。处理同一个请求的所有适配器共用这个 fork。
+- `current(handle)` 是请求解析时使用的 Pond；`cyrenex/testing` 的 override 生效期间就是 override 的那个。
+- `describeError(error, expose)` 是 `PondError` 的响应体。
 
-adapter 由应用自己决定，cyrenex 不会注入。Bun 不需要 adapter；在 Node.js 上，自行安装 `@elysia/node`，并传入 `@cyrenex/elysia/node` 提供的 adapter：
-
-```ts
-import { node } from "@cyrenex/elysia/node";
-
-export default new Elysia({ adapter: node() }).use(pondi(pond));
-```
-
-它包装了 `@elysia/node`，并修好了 `app.stop()`：上游既不设置 `app.server`，也没有实现 `stop`，所以 `app.stop()` 会直接报错，`onStop` 钩子永远不会执行。如果你自行使用原版 `@elysia/node`，`start` 仍会自行关闭服务器并执行这些钩子，但你自己代码里的 `app.stop()` 会报错。
-
-想让同一个应用在两种运行时上运行，可以在启动时选择：
-
-```ts
-export const adapter =
-  "Bun" in globalThis ? undefined : (await import("@cyrenex/elysia/node")).node();
-```
-
-## 已知限制
-
-- 在 Node.js 上，Elysia 只会在使用了支持 WebSocket 的 adapter 的实例上注册 `.ws()` 路由，所以定义 `.ws()` 的插件也要传入 adapter。
-- 在 Node.js 上，带 body schema 的 WebSocket 消息可能需要显式配置 `parse`。
+可以参考 [`@cyrenex/elysia`](https://github.com/cyrenex/core/blob/master/packages/elysia/src/inject.ts) 的实现。
 
 ## 本地开发
 
@@ -485,7 +351,7 @@ pnpm test
 vp check
 ```
 
-playground 通过 `cyrenex-source` 导出条件解析 `cyrenex`（见 `playground/vite.config.ts` 与 `tsconfig.json`），修改 `packages/cyrenex/src` 会直接重启应用，无需重新构建。只有修改 Vite 插件本身时才需要运行 `vp run cyrenex#build`。
+各个包之间通过 `cyrenex-source` 导出条件解析到源码（见 `playground/vite.config.ts` 与各个 `tsconfig.json`），修改 `packages/*/src` 会直接重启 playground，测试也直接运行源码，无需重新构建。只有修改 Vite 插件本身时才需要运行 `vp run cyrenex#build`。
 
 ## License
 

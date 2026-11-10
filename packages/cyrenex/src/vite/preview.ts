@@ -13,7 +13,7 @@ import type { Logger, Plugin } from "vite";
 import { IPC_ENV, LISTENING_EVENT } from "../host.ts";
 import type { ListeningMessage } from "../host.ts";
 import { serverBuildOf } from "./build.ts";
-import { packageDirOf } from "./packages.ts";
+import { locate, packageDirOf } from "./packages.ts";
 import { freePort, waitForPort } from "./ports.ts";
 import { executableOf } from "./process.ts";
 import type { ResolvedOptions } from "./types.ts";
@@ -116,7 +116,7 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
       const { root, logger } = server.config;
       if (!options.build) return;
       const build = serverBuildOf(options, root);
-      const main = build ? resolve(root, build.outDir, "main.mjs") : resolve(root, options.server);
+      const main = build ? resolve(root, build.outDir, "main.mjs") : locate(root, options.server);
       if (!existsSync(main)) {
         if (build) {
           logger.warn(

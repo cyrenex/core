@@ -5,7 +5,7 @@ import { normalizePath } from "vite";
 import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
 import { CLIENT_DIR_ENV } from "../host.ts";
-import { sourceCommand } from "./packages.ts";
+import { locate, sourceCommand } from "./packages.ts";
 import { ENVIRONMENT } from "./types.ts";
 import type { ResolvedOptions } from "./types.ts";
 
@@ -19,7 +19,7 @@ export function serverBuildOf(
 ): { entry: string; outDir: string } | undefined {
   const server = options.build && options.build.server;
   if (!server) return undefined;
-  const entry = resolve(root, options.server);
+  const entry = locate(root, options.server);
   // Defaulted: only build when the conventional entry exists, so API-less setups are untouched.
   if (server.auto && !existsSync(entry)) return undefined;
   return { entry, outDir: server.outDir };
@@ -127,7 +127,7 @@ export function buildPlugin(options: ResolvedOptions): Plugin {
       const client = outDirOf(resolved, "client");
       if (build.client.outDir) assertDisposable(client, root, "the client build");
       for (const target of build.client.copyTo) {
-        assertDisposable(normalizePath(resolve(root, target)), root, "build.client.copyTo");
+        assertDisposable(locate(root, target), root, "build.client.copyTo");
       }
       if (server && contains(client, outDirOf(resolved, ENVIRONMENT))) {
         // start() hosts the client directory: the server code would be public.
@@ -159,13 +159,13 @@ export function buildPlugin(options: ResolvedOptions): Plugin {
         const shown = (dir: string) => normalizePath(relative(root, dir)) || ".";
         const lines = [`client → ${shown(client)}`];
         for (const target of build.client.copyTo) {
-          const dir = normalizePath(resolve(root, target));
+          const dir = locate(root, target);
           rmSync(dir, { recursive: true, force: true });
           cpSync(client, dir, { recursive: true });
           lines.push(`client → ${shown(dir)} (copy)`);
         }
 
-        const entry = resolve(root, options.server);
+        const entry = locate(root, options.server);
         if (server) {
           const main = `${shown(outDirOf(config, ENVIRONMENT))}/main.mjs`;
           lines.push(`server → ${main}`);

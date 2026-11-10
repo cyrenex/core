@@ -5,14 +5,15 @@ import { normalizePath } from "vite";
 import type { Plugin } from "vite";
 
 import { buildPlugin, serverBuildOf } from "./build.ts";
+import { locate } from "./packages.ts";
 import { ServerEnvironment } from "./environment.ts";
 import { previewPlugin } from "./preview.ts";
 import { ENVIRONMENT } from "./types.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
-export type { BuildOptions, CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
+export type { BuildOptions, CyrenexOptions, Location, RestartEvent, Runtime } from "./types.ts";
 
-const asArray = (value: string | string[] | undefined) =>
+const asArray = <T>(value: T | T[] | undefined): T[] =>
   value === undefined ? [] : Array.isArray(value) ? value : [value];
 
 function resolveOptions(options: CyrenexOptions): ResolvedOptions {
@@ -84,7 +85,7 @@ function dtsPlugin(options: ResolvedOptions): Plugin {
     configResolved(config) {
       if (options.dts === false) return;
       const file = resolve(config.root, options.dts);
-      const content = renderDts(file, resolve(config.root, options.app));
+      const content = renderDts(file, locate(config.root, options.app));
       if (existsSync(file) && readFileSync(file, "utf8") === content) return;
       writeFileSync(file, content);
     },

@@ -9,5 +9,5 @@ dist
 !.env.example
 
 # Copied from the repository root on prepack
-packages/*/README*.md
+packages/cyrenex/README*.md
 packages/*/LICENSE

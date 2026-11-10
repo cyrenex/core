@@ -12,22 +12,28 @@ export interface RestartEvent {
 /** Runtime executable used to launch the isolated application process. */
 export type Runtime = "node" | "bun";
 
+/**
+ * A file or directory: a path relative to Vite root, or a path inside a workspace package,
+ * found through `node_modules` (declare the package as a dependency, e.g. `workspace:*`).
+ */
+export type Location = string | { package: string; path: string };
+
 export interface CyrenexOptions {
   /**
    * The server entry, relative to Vite root: the module that starts the app, usually with
    * `start(app)` from `cyrenex/start`. `vp dev` runs it and forwards `routes` to it; `vp build`
-   * bundles it. It may live in another package of a monorepo: the app then runs in that
-   * package's directory, with its `.env` files.
+   * bundles it. It may live in another package of a monorepo, `{ package: "@acme/api", path:
+   * "src/main.ts" }`: the app then runs in that package's directory, with its `.env` files.
    * @default "server/main.ts"
    */
-  server?: string;
+  server?: Location;
 
   /**
    * Module default-exporting the app, relative to Vite root: its type is what `cyrenex/client`
    * exposes to the frontend. Only read for types.
    * @default "server/app.ts"
    */
-  app?: string;
+  app?: Location;
 
   /**
    * Child process runtime, independent of the runtime running Vite.
@@ -103,7 +109,7 @@ export interface BuildOptions {
    * are emptied first, so they must not be a package root.
    * @default Vite's `build.outDir`, or "dist/client" when the server is bundled
    */
-  client?: string | { outDir?: string; copyTo?: string | string[] };
+  client?: string | { outDir?: string; copyTo?: Location | Location[] };
 
   /**
    * How you start the server, shown after building: `"pnpm start"`, `"bun --filter api start"`…
@@ -114,8 +120,8 @@ export interface BuildOptions {
 }
 
 export interface ResolvedOptions {
-  server: string;
-  app: string;
+  server: Location;
+  app: Location;
   runtime: Runtime;
   routes: string[] | "auto";
   watch: false | string[];
@@ -128,7 +134,7 @@ export interface ResolvedOptions {
     | {
         /** `auto`: defaulted, so skipped when the entry does not exist. */
         server: false | { outDir: string; auto: boolean };
-        client: { outDir: string | undefined; copyTo: string[] };
+        client: { outDir: string | undefined; copyTo: Location[] };
         start: string | undefined;
       };
 }

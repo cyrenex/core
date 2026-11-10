@@ -105,6 +105,46 @@ export async function release(request: Request | undefined): Promise<void> {
   await scope.dispose();
 }
 
+/**
+ * Release the request's scope once `response`'s body has been sent, or cancelled, so streamed
+ * responses (server-sent events, async iterators) keep their scoped values until they end.
+ */
+export async function releaseAfter(request: Request, response: Response): Promise<Response> {
+  if (!response.body) {
+    await release(request);
+    return response;
+  }
+  let released = false;
+  const finish = () => {
+    if (released) return;
+    released = true;
+    release(request).catch((error: unknown) => console.error(error));
+  };
+  const reader = response.body.getReader();
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const chunk = await reader.read();
+        if (chunk.done) {
+          controller.close();
+          finish();
+        } else {
+          controller.enqueue(chunk.value);
+        }
+      } catch (error) {
+        controller.error(error);
+        finish();
+      }
+    },
+    cancel(reason) {
+      finish();
+      return reader.cancel(reason);
+    },
+  });
+  const { status, statusText, headers } = response;
+  return new Response(body, { status, statusText, headers });
+}
+
 /** Whether `PondError` details go into responses. */
 export const exposeErrorsDefault = (): boolean => process.env.NODE_ENV !== "production";
 

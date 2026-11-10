@@ -1,0 +1,59 @@
+{
+  "name": "@cyrenex/orpc",
+  "version": "0.2.0",
+  "description": "oRPC adapter for cyrenex: pondi dependency injection and request scopes for oRPC procedures.",
+  "keywords": [
+    "cyrenex",
+    "dependency-injection",
+    "orpc",
+    "rpc"
+  ],
+  "homepage": "https://github.com/cyrenex/core#readme",
+  "bugs": {
+    "url": "https://github.com/cyrenex/core/issues"
+  },
+  "license": "MIT",
+  "author": "byc <bycrxemail@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyrenex/core.git",
+    "directory": "packages/orpc"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "cyrenex-source": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "prepack": "node -e \"require('node:fs').copyFileSync('../../LICENSE', 'LICENSE')\""
+  },
+  "devDependencies": {
+    "@orpc/client": "catalog:",
+    "@orpc/server": "catalog:",
+    "@types/node": "catalog:",
+    "cyrenex": "workspace:*",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "@orpc/server": "^2.0.0-beta.50",
+    "cyrenex": "workspace:^"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -262,6 +262,8 @@ createServer((req, res) => res.end(JSON.stringify({ url: req.url, pid: process.p
   test("runs a server entry from another package of a monorepo", async () => {
     const root = join(TMP, Math.random().toString(36).slice(2));
     const files: Record<string, string> = {
+      // Found by scanning the workspace: nothing is installed.
+      "pnpm-workspace.yaml": "packages:\n  - '*'\n",
       "web/package.json": JSON.stringify({ name: "web" }),
       "web/index.html": "<p>web</p>",
       "api/package.json": JSON.stringify({ name: "api" }),
@@ -279,7 +281,13 @@ createServer((req, res) => res.end(JSON.stringify({ url: req.url, pid: process.p
       logLevel: "silent",
       environments,
       server: { port: 0, host: "127.0.0.1" },
-      plugins: [cyrenex({ runtime, server: "../api/main.ts", app: "../api/app.ts" })],
+      plugins: [
+        cyrenex({
+          runtime,
+          server: { package: "api", path: "main.ts" },
+          app: { package: "api", path: "app.ts" },
+        }),
+      ],
     });
     servers.push(server);
     await server.listen();
