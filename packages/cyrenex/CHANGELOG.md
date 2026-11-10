@@ -1,5 +1,19 @@
 # cyrenex
 
+## 0.2.0-beta.1
+
+### Minor Changes
+
+- [#4](https://github.com/cyrenex/core/pull/4) [`a25b502`](https://github.com/cyrenex/core/commit/a25b5020f4f6c04eefa4c276fdee00d2480a14fa) Thanks [@YanChenBai](https://github.com/YanChenBai)! - Monorepo support in `cyrenex/vite`.
+
+  - `entry` and `build.entry` take `{ package, path }`: the package is found in `node_modules`, else among the packages of the workspace (`pnpm-workspace.yaml`, or `workspaces` in `package.json`), without installing.
+  - `vp dev` runs an app from another package in that package's directory, with its `.env` files.
+  - `build.outDir: false` ships the server as source; `vp preview` then runs the entry in its package.
+  - `build.client` sets the client output and copies it elsewhere with `copyTo`; directories outside Vite root are emptied first and must not be a package root.
+  - `build.start` is the command printed after the build, next to where the client and server went.
+
+- [`e3a4376`](https://github.com/cyrenex/core/commit/e3a4376a7a290a2f2d59847c3237e4e938143450) Thanks [@YanChenBai](https://github.com/YanChenBai)! - Upgrade `@cyrenex/pondi` to 0.2.0: `cyrenex` now re-exports `ripple.scoped` and `ripple.transient` (rippling with a fixed mode, no options) and their `ModeRipple` / `ModeRippleClass` types.
+
 ## 0.2.0-beta.0
 
 ### Minor Changes
