@@ -1,5 +1,11 @@
 # cyrenex
 
+## 0.2.0-beta.2
+
+### Patch Changes
+
+- [`fe942e9`](https://github.com/cyrenex/core/commit/fe942e9b6760ac20fd473448fe7ff13289f94845) Thanks [@YanChenBai](https://github.com/YanChenBai)! - `{ package, path }` locations are only looked up in `node_modules`, like any import: declare the package as a dependency (`"@acme/api": "workspace:*"`) and install. The workspace is no longer scanned.
+
 ## 0.2.0-beta.1
 
 ### Minor Changes
