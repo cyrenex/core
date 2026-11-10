@@ -1,4 +1,4 @@
-import { inject, pondi } from "cyrenex";
+import { inject, pondi } from "@cyrenex/elysia";
 import { Elysia } from "elysia";
 
 import { adapter } from "./adapter.ts";

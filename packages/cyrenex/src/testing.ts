@@ -1,8 +1,5 @@
 import type { Pond, Ripple } from "@cyrenex/pondi";
-import type { AnyElysia } from "elysia";
-
-import { POND } from "./inject.ts";
-import type { PondHandle } from "./inject.ts";
+import { pondOf } from "./lifecycle.ts";
 
 export interface Override extends AsyncDisposable {
   /** The fork requests resolve from while the override is active. */
@@ -32,10 +29,10 @@ export interface Override extends AsyncDisposable {
  * same app concurrently.
  */
 export function override(
-  app: AnyElysia,
+  app: object,
   ...ripples: (Ripple<any> | readonly Ripple<any>[])[]
 ): Override {
-  const handle = (app as { [POND]?: PondHandle })[POND];
+  const handle = pondOf(app);
   if (!handle) {
     throw new TypeError("cyrenex: override() needs an app using pondi(pond).");
   }

@@ -1,32 +1,34 @@
-import { existsSync } from "node:fs";
+import { cpSync, existsSync, rmSync } from "node:fs";
 import { relative, resolve } from "node:path";
 
 import { normalizePath } from "vite";
 import type { Plugin, ResolvedConfig, UserConfig } from "vite";
 
-import { CLIENT_DIR_ENV, ENVIRONMENT } from "./types.ts";
+import { CLIENT_DIR_ENV } from "../host.ts";
+import { sourceCommand } from "./packages.ts";
+import { ENVIRONMENT } from "./types.ts";
 import type { ResolvedOptions } from "./types.ts";
 
 const ENTRY = "virtual:cyrenex/server-entry";
 const SETUP = "virtual:cyrenex/server-setup";
 
-/** The server entry to build, or `undefined` when the server build is off for this root. */
+/** The server entry to bundle, or `undefined` when the server ships as source. */
 export function serverBuildOf(
   options: ResolvedOptions,
   root: string,
 ): { entry: string; outDir: string } | undefined {
-  const { build } = options;
-  if (!build) return undefined;
-  const entry = resolve(root, build.entry);
+  const server = options.build && options.build.server;
+  if (!server) return undefined;
+  const entry = resolve(root, options.server);
   // Defaulted: only build when the conventional entry exists, so API-less setups are untouched.
-  if (build.auto && !existsSync(entry)) return undefined;
-  return { entry, outDir: build.outDir };
+  if (server.auto && !existsSync(entry)) return undefined;
+  return { entry, outDir: server.outDir };
 }
 
 /**
  * Code run before the server entry is imported: `.env` files of the mode (as `vite build`
  * would read them, but from the working directory at runtime), `NODE_ENV`, and where the
- * client build is, for `serve()`.
+ * client build is, for `start()`.
  */
 function renderSetup(mode: string, clientDir: string): string {
   const files = [`.env.${mode}.local`, ".env.local", `.env.${mode}`, ".env"];
@@ -45,66 +47,137 @@ process.env.${CLIENT_DIR_ENV} ??= resolve(import.meta.dirname, ${JSON.stringify(
 `;
 }
 
+/** `dir` contains `other`, or is it. */
+const contains = (dir: string, other: string) => `${other}/`.startsWith(`${dir}/`);
+
+/**
+ * Refuse to empty a directory holding the project or a package: client builds outside Vite
+ * root (a monorepo's server package) are emptied, and a typo must not wipe a package.
+ */
+function assertDisposable(dir: string, root: string, what: string): void {
+  const shown = normalizePath(relative(root, dir)) || ".";
+  if (contains(dir, root)) {
+    throw new Error(`cyrenex: ${what} (${shown}) must not contain the project root.`);
+  }
+  if (existsSync(resolve(dir, "package.json"))) {
+    throw new Error(
+      `cyrenex: ${what} (${shown}) is a package root and would be emptied; ` +
+        `use a directory inside it, e.g. "${shown}/public".`,
+    );
+  }
+}
+
 /**
  * Build the server entry next to the client: `vp build` writes `dist/client` and
- * `dist/server/main.mjs`, runnable with `node` or `bun`.
+ * `dist/server/main.mjs`, runnable with `node` or `bun`. With the server shipped as source,
+ * the client may go to (or be copied into) the server's package instead.
  */
 export function buildPlugin(options: ResolvedOptions): Plugin {
   let config: ResolvedConfig;
   let server: { entry: string; outDir: string } | undefined;
+  const build = options.build;
 
   return {
     name: "cyrenex:build",
     apply: "build",
 
     config(user) {
-      server = serverBuildOf(options, resolve(user.root ?? process.cwd()));
-      if (!server) return;
+      if (!build) return;
+      const root = resolve(user.root ?? process.cwd());
+      server = serverBuildOf(options, root);
 
-      const clientOutDir =
-        user.build?.outDir || user.environments?.client?.build?.outDir
-          ? {}
-          : { outDir: "dist/client" };
+      const userOutDir = user.build?.outDir || user.environments?.client?.build?.outDir;
+      const client = build.client.outDir
+        ? { outDir: build.client.outDir, emptyOutDir: true }
+        : server && !userOutDir
+          ? { outDir: "dist/client" }
+          : {};
       return {
         // Build every environment with a plain `vp build`, not just the client.
         builder: {},
         environments: {
-          client: { build: clientOutDir },
-          [ENVIRONMENT]: {
-            build: {
-              outDir: server.outDir,
-              emptyOutDir: true,
-              copyPublicDir: false,
-              target: "esnext",
-              minify: false,
-              rolldownOptions: {
-                input: { main: ENTRY },
-                output: {
-                  format: "es",
-                  entryFileNames: "[name].mjs",
-                  chunkFileNames: "chunks/[name]-[hash].mjs",
+          client: { build: client },
+          ...(server && {
+            [ENVIRONMENT]: {
+              build: {
+                outDir: server.outDir,
+                emptyOutDir: true,
+                copyPublicDir: false,
+                target: "esnext",
+                minify: false,
+                rolldownOptions: {
+                  input: { main: ENTRY },
+                  output: {
+                    format: "es",
+                    entryFileNames: "[name].mjs",
+                    chunkFileNames: "chunks/[name]-[hash].mjs",
+                  },
                 },
               },
             },
-          },
+          }),
         },
       } satisfies UserConfig;
     },
 
     configResolved(resolved) {
       config = resolved;
-      if (!server) return;
-      const outDir = (name: string) =>
-        normalizePath(resolve(resolved.root, resolved.environments[name]!.build.outDir));
-      const client = outDir("client");
-      if (`${outDir(ENVIRONMENT)}/`.startsWith(`${client}/`)) {
-        // serve() hosts the client directory: the server code would be public.
+      if (!build) return;
+      const root = normalizePath(resolved.root);
+      const client = outDirOf(resolved, "client");
+      if (build.client.outDir) assertDisposable(client, root, "the client build");
+      for (const target of build.client.copyTo) {
+        assertDisposable(normalizePath(resolve(root, target)), root, "build.client.copyTo");
+      }
+      if (server && contains(client, outDirOf(resolved, ENVIRONMENT))) {
+        // start() hosts the client directory: the server code would be public.
         throw new Error(
-          `cyrenex: the server build (${options.build && options.build.outDir}) must not be ` +
-            `inside the client build (${normalizePath(relative(resolved.root, client))}). ` +
-            `Set the client outDir to e.g. "dist/client", or build.outDir of cyrenex().`,
+          `cyrenex: the server build (${server.outDir}) must not be inside the client build ` +
+            `(${normalizePath(relative(root, client))}). Set the client outDir to e.g. ` +
+            `"dist/client", or build.server.outDir of cyrenex().`,
         );
       }
+    },
+
+    buildApp: {
+      order: "post",
+      async handler(builder) {
+        if (!build) return;
+        // As Vite does after the buildApp hooks, unless one built something already. The
+        // server environment may exist without an entry (configured, server shipped as
+        // source): it has nothing to build then.
+        const environments = Object.values(builder.environments);
+        if (environments.every((environment) => !environment.isBuilt)) {
+          for (const environment of environments) {
+            if (environment.name === ENVIRONMENT && !server) continue;
+            await builder.build(environment);
+          }
+        }
+
+        const root = normalizePath(config.root);
+        const client = outDirOf(config, "client");
+        const shown = (dir: string) => normalizePath(relative(root, dir)) || ".";
+        const lines = [`client → ${shown(client)}`];
+        for (const target of build.client.copyTo) {
+          const dir = normalizePath(resolve(root, target));
+          rmSync(dir, { recursive: true, force: true });
+          cpSync(client, dir, { recursive: true });
+          lines.push(`client → ${shown(dir)} (copy)`);
+        }
+
+        const entry = resolve(root, options.server);
+        if (server) {
+          const main = `${shown(outDirOf(config, ENVIRONMENT))}/main.mjs`;
+          lines.push(`server → ${main}`);
+          lines.push(`start it with: ${build.start ?? `${options.runtime} ${main}`}`);
+        } else if (existsSync(entry)) {
+          lines.push(`server ships as source (${shown(entry)})`);
+          lines.push(
+            `start it with: ${build.start ?? sourceCommand(root, entry, options.runtime)}`,
+          );
+        }
+        for (const line of lines) config.logger.info(`cyrenex: ${line}`);
+      },
     },
 
     resolveId(id) {
@@ -119,11 +192,13 @@ export function buildPlugin(options: ResolvedOptions): Plugin {
         return `import ${JSON.stringify(SETUP)};\nawait import(${JSON.stringify(normalizePath(server.entry))});\n`;
       }
       if (id === `\0${SETUP}`) {
-        const outDir = (name: string) =>
-          resolve(config.root, config.environments[name]!.build.outDir);
-        const clientDir = normalizePath(relative(outDir(ENVIRONMENT), outDir("client")));
-        return renderSetup(config.mode, clientDir);
+        const clientDir = relative(outDirOf(config, ENVIRONMENT), outDirOf(config, "client"));
+        return renderSetup(config.mode, normalizePath(clientDir));
       }
     },
   };
+}
+
+function outDirOf(config: ResolvedConfig, environment: string): string {
+  return normalizePath(resolve(config.root, config.environments[environment]!.build.outDir));
 }

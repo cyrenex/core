@@ -14,6 +14,18 @@ import { runtimes } from "./runtimes.ts";
 
 // Inside the package, so the fixture resolves elysia from its node_modules.
 const TMP = join(import.meta.dirname, "../.tmp/vite");
+const elysia = (file: string) =>
+  JSON.stringify(join(import.meta.dirname, "../../elysia/src", file).replaceAll("\\", "/"));
+/** Workspace packages imported by fixtures resolve to their source. */
+const environments = { server: { resolve: { conditions: ["cyrenex-source"] } } };
+
+/** The server entry: starts `./app.ts` with Elysia's own listener, for its WebSockets. */
+const main = `
+import { start } from ${elysia("index.ts")};
+import app from "./app.ts";
+
+await start(app);
+`;
 
 const app = (message: string, extra = "") => `
 import { Elysia } from "elysia";
@@ -56,13 +68,15 @@ async function launch(
     mkdirSync(join(root, file, ".."), { recursive: true });
     writeFileSync(join(root, file), content);
   };
-  for (const [file, content] of Object.entries({ "index.html": "<p>web</p>", ...files })) {
+  const defaults = { "index.html": "<p>web</p>", "server/main.ts": main };
+  for (const [file, content] of Object.entries({ ...defaults, ...files })) {
     write(file, content);
   }
   const server = await createServer({
     root,
     configFile: false,
     logLevel: "silent",
+    environments,
     server: { port: 0, host: "127.0.0.1" },
     plugins: [cyrenex({ runtime, ...options })],
     ...config,
@@ -231,6 +245,54 @@ describe.each(runtimes)("cyrenex/vite on %s", { timeout: 30_000 }, (runtime) => 
     await until(async () => page.messages.find((m) => m.type === "full-reload"), Boolean);
     page.close();
     late.close();
+  });
+
+  test("forwards to an entry that listens on PORT without start()", async () => {
+    const { url } = await start({
+      "server/main.ts": `
+import { createServer } from "node:http";
+
+createServer((req, res) => res.end(JSON.stringify({ url: req.url, pid: process.pid })))
+  .listen(Number(process.env.PORT), process.env.HOST);
+`,
+    });
+    expect(await json(`${url}/api/raw`)).toMatchObject({ url: "/api/raw" });
+  });
+
+  test("runs a server entry from another package of a monorepo", async () => {
+    const root = join(TMP, Math.random().toString(36).slice(2));
+    const files: Record<string, string> = {
+      "web/package.json": JSON.stringify({ name: "web" }),
+      "web/index.html": "<p>web</p>",
+      "api/package.json": JSON.stringify({ name: "api" }),
+      "api/.env": "WHERE=api package",
+      "api/main.ts": main,
+      "api/app.ts": app("monorepo", `.get("/api/where", () => [process.env.WHERE, process.cwd()])`),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(join(root, file, ".."), { recursive: true });
+      writeFileSync(join(root, file), content);
+    }
+    const server = await createServer({
+      root: join(root, "web"),
+      configFile: false,
+      logLevel: "silent",
+      environments,
+      server: { port: 0, host: "127.0.0.1" },
+      plugins: [cyrenex({ runtime, server: "../api/main.ts", app: "../api/app.ts" })],
+    });
+    servers.push(server);
+    await server.listen();
+    const { port } = server.httpServer!.address() as AddressInfo;
+
+    const [where, cwd] = (await fetch(`http://127.0.0.1:${port}/api/where`).then((r) =>
+      r.json(),
+    )) as string[];
+    expect(where).toBe("api package");
+    expect(cwd!.replaceAll("\\", "/")).toBe(join(root, "api").replaceAll("\\", "/"));
+    expect(readFileSync(join(root, "web/cyrenex-env.d.ts"), "utf8")).toContain(
+      'typeof import("../api/app.ts").default',
+    );
   });
 
   test("forwards WebSocket upgrades", async () => {

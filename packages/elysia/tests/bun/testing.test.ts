@@ -4,8 +4,10 @@ import { describe, expect, test } from "bun:test";
 import { treaty } from "@elysia/eden";
 import { Elysia } from "elysia";
 
-import { inject, Pond, pondi, RequestContext, ripple } from "../../src/index.ts";
-import { override } from "../../src/testing.ts";
+import { Pond, ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+
+import { inject, pondi, RequestContext } from "../../src/index.ts";
 
 // What server/app.ts would export: pondi() and the routes already applied.
 const Db = ripple("db", () => ({ users: ["Ada"] }));

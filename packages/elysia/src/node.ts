@@ -52,7 +52,7 @@ function withMiddleware(options: ListenOptions): ListenOptions {
  * length headers. This adapter fixes all three.
  *
  * ```ts
- * import { node } from "cyrenex/node";
+ * import { node } from "@cyrenex/elysia/node";
  *
  * export default new Elysia({ adapter: node() }).use(pondi(pond));
  * ```

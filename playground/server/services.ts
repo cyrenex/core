@@ -1,4 +1,5 @@
-import { asyncDispose, init, pebble, RequestContext, ripple } from "cyrenex";
+import { RequestContext } from "@cyrenex/elysia";
+import { asyncDispose, init, pebble, ripple } from "cyrenex";
 
 export interface Todo {
   id: number;

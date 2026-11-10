@@ -31,7 +31,7 @@ export type StaticPluginOptions = Omit<UpstreamOptions, "prefix"> & {
  * in development the frontend is served by Vite.
  *
  * ```ts
- * import { staticPlugin } from "cyrenex/static";
+ * import { staticPlugin } from "@cyrenex/elysia/static";
  *
  * app.use(await staticPlugin()).listen(3000);
  * ```

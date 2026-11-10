@@ -1,5 +1,3 @@
-import type { AnyElysia } from "elysia";
-
 /**
  * Filled in by the generated `cyrenex-env.d.ts`:
  *
@@ -14,5 +12,8 @@ import type { AnyElysia } from "elysia";
 // oxlint-disable-next-line no-empty-interface
 export interface Register {}
 
-/** The server app type for Eden: `treaty<App>(location.origin)`. */
-export type App = Register extends { app: infer A extends AnyElysia } ? A : AnyElysia;
+/**
+ * The server app type, for typed clients: `treaty<App>(location.origin)` with Eden. `unknown`
+ * until `cyrenex-env.d.ts` registers the app.
+ */
+export type App = Register extends { app: infer A } ? A : unknown;

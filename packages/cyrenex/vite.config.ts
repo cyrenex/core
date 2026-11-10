@@ -8,10 +8,9 @@ export default defineConfig({
   pack: {
     entry: {
       index: "src/index.ts",
+      adapter: "src/adapter.ts",
       client: "src/client.ts",
-      node: "src/node.ts",
-      static: "src/static.ts",
-      serve: "src/serve.ts",
+      start: "src/start.ts",
       testing: "src/testing.ts",
       vite: "src/vite/index.ts",
       // Spawned as a separate process by the dev plugin; must stay next to vite.mjs.

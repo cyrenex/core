@@ -1,8 +1,10 @@
 import { Elysia } from "elysia";
 import { describe, expect, test, vi } from "vite-plus/test";
 
-import { inject, pebble, Pond, PondError, pondi, ripple, warmup } from "../src/index.ts";
-import type { Ripple } from "../src/index.ts";
+import { pebble, Pond, PondError, ripple, warmup } from "cyrenex";
+import type { Ripple } from "cyrenex";
+
+import { inject, pondi } from "../src/index.ts";
 
 function tracked(log: string[], name: string, deps: readonly Ripple<unknown>[] = []) {
   return ripple(name, deps, () => {

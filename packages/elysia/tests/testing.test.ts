@@ -2,8 +2,10 @@ import { treaty } from "@elysia/eden";
 import { Elysia } from "elysia";
 import { describe, expect, test } from "vite-plus/test";
 
-import { inject, Pond, pondi, ripple } from "../src/index.ts";
-import { override } from "../src/testing.ts";
+import { Pond, ripple } from "cyrenex";
+import { override } from "cyrenex/testing";
+
+import { inject, pondi } from "../src/index.ts";
 
 function setup() {
   const log: string[] = [];

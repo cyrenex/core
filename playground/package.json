@@ -12,9 +12,9 @@
     "start:source": "bun server/main.ts"
   },
   "dependencies": {
+    "@cyrenex/elysia": "workspace:*",
     "@elysia/eden": "catalog:",
     "@elysia/node": "catalog:",
-    "@elysia/static": "catalog:",
     "cyrenex": "workspace:*",
     "elysia": "catalog:"
   },

@@ -1,27 +1,28 @@
-// serve() on Bun: warm-up, static files, and a stop that waits for the Pond.
+// start() of @cyrenex/elysia on Bun (Bun.serve): warm-up, static files, and a stop that
+// waits for the Pond.
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { Pond, ripple } from "cyrenex";
+import type { Server } from "cyrenex/start";
 import { Elysia } from "elysia";
 
-import { Pond, pondi, ripple } from "../../src/index.ts";
-import { serve } from "../../src/serve.ts";
-import type { Serving } from "../../src/serve.ts";
+import { pondi, start } from "../../src/index.ts";
 
-const running: Serving[] = [];
+const running: Server[] = [];
 const dirs: string[] = [];
 
 afterEach(async () => {
-  for (const serving of running.splice(0)) await serving.stop();
+  for (const server of running.splice(0)) await server.stop();
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
-describe("serve", () => {
+describe("start", () => {
   test("warms up, serves the API and the client build, and disposes on stop", async () => {
     spyOn(console, "log").mockImplementation(() => {});
-    const assets = mkdtempSync(join(tmpdir(), "cyrenex-bun-serve-"));
+    const assets = mkdtempSync(join(tmpdir(), "cyrenex-bun-listen-"));
     dirs.push(assets);
     writeFileSync(join(assets, "index.html"), "<p>spa</p>");
 
@@ -37,16 +38,16 @@ describe("serve", () => {
     });
     const app = new Elysia().use(pondi(new Pond(), { eager: [Db] })).get("/api/hello", () => "hi");
 
-    const serving = await serve(app, { port: 0, static: { assets }, signals: false });
-    running.push(serving);
+    const server = await start(app, { port: 0, static: assets, signals: false });
+    running.push(server);
     expect(log).toEqual(["open"]);
 
-    expect(await fetch(`${serving.url}/api/hello`).then((r) => r.text())).toBe("hi");
-    expect(await fetch(`${serving.url}/`).then((r) => r.text())).toBe("<p>spa</p>");
-    const page = await fetch(`${serving.url}/some/page`, { headers: { accept: "text/html" } });
+    expect(await fetch(`${server.url}/api/hello`).then((r) => r.text())).toBe("hi");
+    expect(await fetch(`${server.url}/`).then((r) => r.text())).toBe("<p>spa</p>");
+    const page = await fetch(`${server.url}/some/page`, { headers: { accept: "text/html" } });
     expect(await page.text()).toBe("<p>spa</p>");
 
-    await serving.stop();
+    await server.stop();
     expect(log).toEqual(["open", "close"]);
   });
 });

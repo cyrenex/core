@@ -2,7 +2,9 @@ import { treaty } from "@elysia/eden";
 import { Elysia, t } from "elysia";
 import { describe, expect, expectTypeOf, test, vi } from "vite-plus/test";
 
-import { inject, pebble, Pond, pondi, RequestContext, ripple } from "../src/index.ts";
+import { pebble, Pond, ripple } from "cyrenex";
+
+import { inject, pondi, RequestContext } from "../src/index.ts";
 
 interface User {
   id: string;

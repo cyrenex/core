@@ -1,9 +1,10 @@
-// Production entry: `vp build` bundles it to dist/server/main.mjs (run with node or bun);
-// `bun server/main.ts` also runs it straight from source.
-// serve() creates `eager` singletons first (a failure aborts startup), serves the client build
-// with SPA fallback, listens on PORT and stops the app (disposing the Pond) on SIGINT/SIGTERM.
-import { serve } from "cyrenex/serve";
+// The server entry: `vp dev` runs it (and forwards /api and /ws to it), `vp build` bundles it
+// to dist/server/main.mjs (run with node or bun), and `bun server/main.ts` runs it from source.
+// start() creates `eager` singletons first (a failure aborts startup), listens on PORT with
+// Elysia's own server (for its WebSockets), serves the client build with SPA fallback, and
+// disposes the Pond on SIGINT/SIGTERM.
+import { start } from "@cyrenex/elysia";
 
 import app from "./app.ts";
 
-await serve(app);
+await start(app);

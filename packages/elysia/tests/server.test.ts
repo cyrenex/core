@@ -4,7 +4,9 @@ import { Elysia, file } from "elysia";
 import type { AnyElysia } from "elysia";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
-import { inject, Pond, pondi, ripple } from "../src/index.ts";
+import { Pond, ripple } from "cyrenex";
+
+import { inject, pondi } from "../src/index.ts";
 import { node } from "../src/node.ts";
 import { stopApp } from "../src/stop.ts";
 import type { StoppableServer } from "../src/stop.ts";

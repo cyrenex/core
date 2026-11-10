@@ -3,45 +3,24 @@ import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { request } from "node:http";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { connect, createServer } from "node:net";
-import type { AddressInfo, Socket } from "node:net";
-import { relative, resolve } from "node:path";
+import { connect } from "node:net";
+import type { Socket } from "node:net";
+import { dirname, relative, resolve } from "node:path";
 
 import { normalizePath } from "vite";
 import type { Logger, Plugin } from "vite";
 
+import { IPC_ENV, LISTENING_EVENT } from "../host.ts";
+import type { ListeningMessage } from "../host.ts";
 import { serverBuildOf } from "./build.ts";
+import { packageDirOf } from "./packages.ts";
+import { freePort, waitForPort } from "./ports.ts";
 import { executableOf } from "./process.ts";
 import type { ResolvedOptions } from "./types.ts";
 
 const HOST = "127.0.0.1";
 
-async function freePort(): Promise<number> {
-  const server = createServer().listen(0, HOST);
-  await new Promise((resolve) => server.once("listening", resolve));
-  const { port } = server.address() as AddressInfo;
-  await new Promise((resolve) => server.close(resolve));
-  return port;
-}
-
-/** Resolves once something accepts connections on `port`. */
-async function waitForPort(port: number, child: ChildProcess, deadline: number): Promise<void> {
-  for (;;) {
-    if (child.exitCode !== null) throw new Error(`exited with code ${child.exitCode}`);
-    if (Date.now() > deadline) throw new Error(`did not listen on PORT=${port} in time`);
-    const open = await new Promise<boolean>((resolve) => {
-      const socket = connect(port, HOST, () => {
-        socket.destroy();
-        resolve(true);
-      });
-      socket.once("error", () => resolve(false));
-    });
-    if (open) return;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-}
-
-/** Forward a request to the built server, streaming both ways. */
+/** Forward a request to the server, streaming both ways. */
 function forward(port: number, req: IncomingMessage, res: ServerResponse): void {
   const upstream = request(
     { host: HOST, port, method: req.method, path: req.url, headers: req.headers },
@@ -58,7 +37,7 @@ function forward(port: number, req: IncomingMessage, res: ServerResponse): void 
   req.pipe(upstream);
 }
 
-/** Replay a WebSocket upgrade to the built server and splice the sockets. */
+/** Replay a WebSocket upgrade to the server and splice the sockets. */
 function forwardUpgrade(port: number, req: IncomingMessage, socket: Socket, head: Buffer): void {
   const upstream = connect(port, HOST, () => {
     const lines = [`${req.method} ${req.url} HTTP/${req.httpVersion}`];
@@ -75,17 +54,34 @@ function forwardUpgrade(port: number, req: IncomingMessage, socket: Socket, head
   socket.once("close", () => upstream.destroy());
 }
 
-function start(main: string, root: string, options: ResolvedOptions, logger: Logger) {
+function start(main: string, cwd: string, root: string, options: ResolvedOptions, logger: Logger) {
   let child: ChildProcess | undefined;
   const ready = (async () => {
-    const port = await freePort();
-    child = spawn(executableOf(options.runtime), [main], {
-      cwd: root,
-      env: { ...process.env, PORT: String(port), HOST },
-      stdio: ["ignore", "inherit", "inherit"],
+    const port = await freePort(HOST);
+    const spawned = spawn(executableOf(options.runtime), [main], {
+      cwd,
+      env: { ...process.env, PORT: String(port), HOST, [IPC_ENV]: "1" },
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
     });
-    await waitForPort(port, child, Date.now() + 15_000);
-    return port;
+    child = spawned;
+    // start() reports its port over IPC; other servers are found by probing PORT.
+    const reported = new Promise<number>((resolve) => {
+      spawned.on("message", (message: Partial<ListeningMessage>) => {
+        if (message?.event === LISTENING_EVENT && message.port) resolve(message.port);
+      });
+    });
+    let done = false;
+    void reported.then(() => (done = true));
+    const exited = () =>
+      done
+        ? new Error("reported")
+        : spawned.exitCode === null
+          ? undefined
+          : new Error(`exited with code ${spawned.exitCode}`);
+    return Promise.race([
+      reported,
+      waitForPort(port, HOST, Date.now() + 15_000, exited).then(() => port),
+    ]);
   })();
   ready.catch((error: unknown) => {
     const message = error instanceof Error ? error.message : String(error);
@@ -107,9 +103,10 @@ function start(main: string, root: string, options: ResolvedOptions, logger: Log
 }
 
 /**
- * `vp preview`: run the built server (`dist/server/main.mjs`) with the configured runtime and
- * forward every request and WebSocket to it. The server hosts the client build itself, as in
- * production, so the preview shows exactly what a deployment serves.
+ * `vp preview`: run the server (`dist/server/main.mjs`, or the entry itself when it ships as
+ * source) with the configured runtime and forward every request and WebSocket to it. The
+ * server hosts the client build itself, as in production, so the preview shows exactly what a
+ * deployment serves.
  */
 export function previewPlugin(options: ResolvedOptions): Plugin {
   return {
@@ -117,18 +114,22 @@ export function previewPlugin(options: ResolvedOptions): Plugin {
 
     configurePreviewServer(server) {
       const { root, logger } = server.config;
+      if (!options.build) return;
       const build = serverBuildOf(options, root);
-      if (!build) return;
-      const main = resolve(root, build.outDir, "main.mjs");
+      const main = build ? resolve(root, build.outDir, "main.mjs") : resolve(root, options.server);
       if (!existsSync(main)) {
-        logger.warn(
-          `cyrenex: ${normalizePath(relative(root, main))} is missing; run vp build to preview ` +
-            "the server. Serving the client build only.",
-        );
+        if (build) {
+          logger.warn(
+            `cyrenex: ${normalizePath(relative(root, main))} is missing; run vp build to ` +
+              "preview the server. Serving the client build only.",
+          );
+        }
         return;
       }
+      // A server shipped as source runs in its package, as it would in production.
+      const cwd = build ? root : (packageDirOf(dirname(main)) ?? root);
 
-      const { ready, kill, stop } = start(main, root, options, logger);
+      const { ready, kill, stop } = start(main, cwd, root, options, logger);
 
       // Before Vite's static middlewares; if the server failed to start, they serve the client.
       server.middlewares.use((req, res, next) => {

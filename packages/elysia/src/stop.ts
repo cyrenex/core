@@ -8,7 +8,7 @@ export interface StoppableServer {
  * Stop a listening app and await its `onStop` hooks (which dispose the Pond), so a process can
  * exit as soon as this resolves.
  *
- * - `cyrenex/node` sets `app.server` and awaits the hooks, so `app.stop()` does the work.
+ * - `@cyrenex/elysia/node` sets `app.server` and awaits the hooks, so `app.stop()` does the work.
  * - Bun's adapter calls the hooks without awaiting them: `app.stop()` would resolve while the
  *   Pond is still disposing. Its server is stopped and the hooks awaited here instead.
  * - Plain `@elysia/node` sets no `app.server`, so the server returned to the `listen` callback

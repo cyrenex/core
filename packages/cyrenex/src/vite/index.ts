@@ -5,20 +5,27 @@ import { normalizePath } from "vite";
 import type { Plugin } from "vite";
 
 import { buildPlugin, serverBuildOf } from "./build.ts";
-import { ElysiaEnvironment } from "./environment.ts";
+import { ServerEnvironment } from "./environment.ts";
 import { previewPlugin } from "./preview.ts";
 import { ENVIRONMENT } from "./types.ts";
 import type { CyrenexOptions, ResolvedOptions, Runtime } from "./types.ts";
 
-export type { CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
+export type { BuildOptions, CyrenexOptions, RestartEvent, Runtime } from "./types.ts";
+
+const asArray = (value: string | string[] | undefined) =>
+  value === undefined ? [] : Array.isArray(value) ? value : [value];
 
 function resolveOptions(options: CyrenexOptions): ResolvedOptions {
   const runtime = options.runtime ?? (process.env.CYRENEX_RUNTIME as Runtime | undefined) ?? "bun";
   if (runtime !== "bun" && runtime !== "node") {
     throw new TypeError(`cyrenex: unknown runtime "${String(runtime)}", expected "bun" or "node"`);
   }
+  const build = options.build;
+  const input = build ? build.client : undefined;
+  const client = typeof input === "string" ? { outDir: input } : input;
   return {
-    entry: options.entry ?? "server/app.ts",
+    server: options.server ?? "server/main.ts",
+    app: options.app ?? "server/app.ts",
     runtime,
     routes: options.routes ?? ["/api", "/ws"],
     watch: options.watch ?? [],
@@ -27,12 +34,18 @@ function resolveOptions(options: CyrenexOptions): ResolvedOptions {
     env: options.env ?? {},
     shutdownTimeout: options.shutdownTimeout ?? 1000,
     build:
-      options.build === false
+      build === false
         ? false
         : {
-            entry: options.build?.entry ?? "server/main.ts",
-            outDir: options.build?.outDir ?? "dist/server",
-            auto: options.build?.entry === undefined,
+            server:
+              build?.server === false
+                ? false
+                : {
+                    outDir: build?.server?.outDir ?? "dist/server",
+                    auto: options.server === undefined && build?.server === undefined,
+                  },
+            client: { outDir: client?.outDir, copyTo: asArray(client?.copyTo) },
+            start: build?.start,
           },
   };
 }
@@ -71,7 +84,7 @@ function dtsPlugin(options: ResolvedOptions): Plugin {
     configResolved(config) {
       if (options.dts === false) return;
       const file = resolve(config.root, options.dts);
-      const content = renderDts(file, resolve(config.root, options.entry));
+      const content = renderDts(file, resolve(config.root, options.app));
       if (existsSync(file) && readFileSync(file, "utf8") === content) return;
       writeFileSync(file, content);
     },
@@ -104,7 +117,7 @@ function environmentPlugin(options: ResolvedOptions): Plugin {
   };
 }
 
-/** Run the Elysia app in a child process and forward matching requests to it. */
+/** Run the server entry in a child process and forward matching requests to it. */
 function devPlugin(options: ResolvedOptions): Plugin {
   return {
     name: "cyrenex:dev",
@@ -115,7 +128,7 @@ function devPlugin(options: ResolvedOptions): Plugin {
         environments: {
           [ENVIRONMENT]: {
             dev: {
-              createEnvironment: (name, config) => new ElysiaEnvironment(name, config, options),
+              createEnvironment: (name, config) => new ServerEnvironment(name, config, options),
             },
           },
         },
@@ -124,7 +137,7 @@ function devPlugin(options: ResolvedOptions): Plugin {
 
     configureServer(server) {
       server.middlewares.use((req, res, next) => {
-        const environment = server.environments[ENVIRONMENT] as ElysiaEnvironment;
+        const environment = server.environments[ENVIRONMENT] as ServerEnvironment;
         if (!environment.matches(req.url ?? "/")) return next();
         void environment.handle(req, res).catch(next);
       });
@@ -138,7 +151,7 @@ function devPlugin(options: ResolvedOptions): Plugin {
 }
 
 /**
- * Develop an Elysia app inside Vite.
+ * Develop and build a server app (`server/main.ts`, started with `start(app)`) inside Vite.
  *
  * ```ts
  * export default defineConfig({ plugins: [cyrenex()] });

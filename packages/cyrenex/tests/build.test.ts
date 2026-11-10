@@ -4,10 +4,10 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { createBuilder, preview } from "vite";
-import type { PreviewServer } from "vite";
-import type { UserConfig } from "vite";
+import type { Logger, PreviewServer, UserConfig } from "vite";
 import { afterEach, describe, expect, test } from "vite-plus/test";
 
 import cyrenex from "../src/vite/index.ts";
@@ -16,14 +16,17 @@ import { executableOf, runtimes } from "./runtimes.ts";
 
 // Inside the package, so the output resolves elysia and @elysia/* from its node_modules.
 const TMP = join(import.meta.dirname, "../.tmp/build");
-const source = (file: string) =>
-  JSON.stringify(join(import.meta.dirname, "../src", file).replaceAll("\\", "/"));
+const elysia = (file: string) =>
+  JSON.stringify(join(import.meta.dirname, "../../elysia/src", file).replaceAll("\\", "/"));
+/** For code Node.js runs as is: it only imports absolute paths as file URLs. */
+const sourceUrl = (file: string) =>
+  JSON.stringify(pathToFileURL(join(import.meta.dirname, "../src", file)).href);
 
 const files = {
   "index.html": "<p>web</p>",
   "server/app.ts": `
 import { Elysia } from "elysia";
-import { node } from ${source("node.ts")};
+import { node } from ${elysia("node.ts")};
 
 const bun = "Bun" in globalThis;
 
@@ -36,10 +39,10 @@ export default new Elysia({ adapter: bun ? undefined : node() })
   .ws("/ws", { message(ws, message) { ws.send(message); } });
 `,
   "server/main.ts": `
-import { serve } from ${source("serve.ts")};
+import { start } from ${elysia("index.ts")};
 import app from "./app.ts";
 
-await serve(app);
+await start(app);
 `,
 };
 
@@ -58,22 +61,40 @@ afterEach(async () => {
   rmSync(TMP, { recursive: true, force: true });
 });
 
+/** Collects what the plugin logs. */
+function capture(lines: string[]): Logger {
+  const ignore = () => {};
+  return {
+    info: (message) => void lines.push(message),
+    warn: ignore,
+    warnOnce: ignore,
+    error: ignore,
+    clearScreen: ignore,
+    hasErrorLogged: () => false,
+    hasWarned: false,
+  };
+}
+
 async function build(
   fixture: Record<string, string>,
   options: CyrenexOptions = {},
   config: UserConfig = {},
+  dir = "",
 ) {
-  const root = join(TMP, Math.random().toString(36).slice(2));
+  const base = join(TMP, Math.random().toString(36).slice(2));
   for (const [file, content] of Object.entries(fixture)) {
-    mkdirSync(join(root, file, ".."), { recursive: true });
-    writeFileSync(join(root, file), content);
+    mkdirSync(join(base, file, ".."), { recursive: true });
+    writeFileSync(join(base, file), content);
   }
+  const root = join(base, dir);
   const builder = await createBuilder(
     {
       root,
       configFile: false,
       logLevel: "silent",
       plugins: [cyrenex({ runtime: "node", ...options })],
+      // Workspace packages imported by fixtures are bundled from their source.
+      environments: { server: { resolve: { conditions: ["cyrenex-source"] } } },
       ...config,
     },
     null,
@@ -155,7 +176,107 @@ describe.each(runtimes)("server build on %s", { timeout: 60_000 }, (runtime) => 
   });
 });
 
+describe.each(runtimes)("server shipped as source on %s", { timeout: 60_000 }, (runtime) => {
+  test("vp preview runs the entry, serving the client copied into its package", async () => {
+    const root = await build(
+      {
+        "web/package.json": JSON.stringify({ name: "web" }),
+        "web/index.html": "<p>web</p>",
+        "api/package.json": JSON.stringify({ name: "api" }),
+        // Run by Node.js as is: no workspace packages, which would resolve to their builds.
+        "api/app.ts": `
+export default {
+  fetch: (request) =>
+    new URL(request.url).pathname === "/api/env"
+      ? Response.json({ runtime: "Bun" in globalThis ? "bun" : "node" })
+      : new Response(null, { status: 404 }),
+};
+`,
+        "api/main.ts": `
+import { start } from ${sourceUrl("start.ts")};
+import app from "./app.ts";
+
+await start(app, { static: new URL("./public", import.meta.url) });
+`,
+      },
+      { runtime, server: "../api/main.ts", build: { server: false, client: "../api/public" } },
+      {},
+      "web",
+    );
+    expect(existsSync(join(root, "../api/public/index.html"))).toBe(true);
+    expect(existsSync(join(root, "dist"))).toBe(false);
+
+    const server = await preview({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      preview: { port: 0, host: "127.0.0.1" },
+      plugins: [cyrenex({ runtime, server: "../api/main.ts", build: { server: false } })],
+    });
+    previews.push(server);
+    const url = server.resolvedUrls!.local[0]!.replace(/\/$/, "");
+    expect(await fetch(`${url}/api/env`).then((r) => r.json())).toMatchObject({ runtime });
+    const page = await fetch(`${url}/deep/link`, { headers: { accept: "text/html" } });
+    expect(await page.text()).toBe("<p>web</p>");
+  });
+});
+
 describe("server build", { timeout: 60_000 }, () => {
+  test("copies the client build and says how to start the server's package", async () => {
+    const fixture = {
+      "web/package.json": JSON.stringify({ name: "web" }),
+      "web/index.html": "<p>web</p>",
+      "api/package.json": JSON.stringify({ name: "@acme/api" }),
+      "api/main.ts": "",
+    };
+    const options = { server: "../api/main.ts" };
+    const client = { outDir: "dist", copyTo: "../api/public" };
+
+    const lines: string[] = [];
+    const root = await build(
+      fixture,
+      { ...options, build: { server: false, client } },
+      { customLogger: capture(lines) },
+      "web",
+    );
+    expect(existsSync(join(root, "dist/index.html"))).toBe(true);
+    expect(existsSync(join(root, "../api/public/index.html"))).toBe(true);
+    expect(lines).toContain("cyrenex: client → ../api/public (copy)");
+    // The runtime on the entry, from its package.
+    expect(lines.at(-1)).toBe("cyrenex: start it with: cd ../api && node main.ts");
+
+    // Or the command the user starts it with, as given.
+    const custom: string[] = [];
+    await build(
+      fixture,
+      { ...options, build: { server: false, client, start: "pnpm --filter @acme/api start" } },
+      { customLogger: capture(custom) },
+      "web",
+    );
+    expect(custom.at(-1)).toBe("cyrenex: start it with: pnpm --filter @acme/api start");
+  });
+
+  test("says how to start the bundled server", async () => {
+    const lines: string[] = [];
+    await build(files, {}, { customLogger: capture(lines) });
+    expect(lines).toContain("cyrenex: start it with: node dist/server/main.mjs");
+  });
+
+  test("refuses to empty a package root", async () => {
+    await expect(
+      build(
+        {
+          "web/package.json": "{}",
+          "web/index.html": "<p>web</p>",
+          "api/package.json": "{}",
+        },
+        { build: { server: false, client: "../api" } },
+        {},
+        "web",
+      ),
+    ).rejects.toThrow("is a package root and would be emptied");
+  });
+
   test("builds only the client without a server entry", async () => {
     const { "server/main.ts": _, ...rest } = files;
     const root = await build(rest);

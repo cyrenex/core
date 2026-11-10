@@ -1,4 +1,4 @@
-import { inject } from "cyrenex";
+import { inject } from "@cyrenex/elysia";
 import { Elysia, t } from "elysia";
 
 import { CurrentUser, TodoService } from "../services.ts";

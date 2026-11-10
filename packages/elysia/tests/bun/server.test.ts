@@ -4,7 +4,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { Elysia } from "elysia";
 import type { AnyElysia } from "elysia";
 
-import { inject, Pond, pondi, ripple } from "../../src/index.ts";
+import { Pond, ripple } from "cyrenex";
+
+import { inject, pondi } from "../../src/index.ts";
 import { stopApp } from "../../src/stop.ts";
 
 const running: AnyElysia[] = [];

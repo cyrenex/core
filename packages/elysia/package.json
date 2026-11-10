@@ -1,0 +1,81 @@
+{
+  "name": "@cyrenex/elysia",
+  "version": "0.2.0",
+  "description": "Elysia adapter for cyrenex: pondi dependency injection, request scopes, Eden types and Elysia's own server.",
+  "keywords": [
+    "bun",
+    "cyrenex",
+    "dependency-injection",
+    "eden",
+    "elysia"
+  ],
+  "homepage": "https://github.com/cyrenex/core#readme",
+  "bugs": {
+    "url": "https://github.com/cyrenex/core/issues"
+  },
+  "license": "MIT",
+  "author": "byc <bycrxemail@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cyrenex/core.git",
+    "directory": "packages/elysia"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "exports": {
+    ".": {
+      "cyrenex-source": "./src/index.ts",
+      "default": "./dist/index.mjs"
+    },
+    "./node": {
+      "cyrenex-source": "./src/node.ts",
+      "default": "./dist/node.mjs"
+    },
+    "./static": {
+      "cyrenex-source": "./src/static.ts",
+      "default": "./dist/static.mjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "vp pack",
+    "dev": "vp pack --watch",
+    "test": "vp test",
+    "check": "vp check",
+    "prepack": "node -e \"for (const f of ['README.md', 'README.zh-CN.md', 'LICENSE']) require('node:fs').copyFileSync('../../' + f, f)\""
+  },
+  "devDependencies": {
+    "@elysia/eden": "catalog:",
+    "@elysia/node": "catalog:",
+    "@elysia/static": "catalog:",
+    "@types/bun": "catalog:",
+    "@types/node": "catalog:",
+    "cyrenex": "workspace:*",
+    "elysia": "catalog:",
+    "typescript": "catalog:",
+    "vite-plus": "catalog:"
+  },
+  "peerDependencies": {
+    "@elysia/node": "^1.4.6",
+    "@elysia/static": "^1.4.11",
+    "cyrenex": "workspace:^",
+    "elysia": "^1.4.30"
+  },
+  "peerDependenciesMeta": {
+    "@elysia/node": {
+      "optional": true
+    },
+    "@elysia/static": {
+      "optional": true
+    }
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
+}

@@ -1,8 +1,5 @@
 /** Vite environment running (in dev) and building the server. */
-export const ENVIRONMENT = "elysia";
-
-/** Set by the built server entry to the client build directory; read by `serve()`. */
-export const CLIENT_DIR_ENV = "CYRENEX_CLIENT_DIR";
+export const ENVIRONMENT = "server";
 
 /** HMR event sent to pages after the app restarted. */
 export const RESTART_EVENT = "cyrenex:restart";
@@ -17,10 +14,20 @@ export type Runtime = "node" | "bun";
 
 export interface CyrenexOptions {
   /**
-   * Module default-exporting the Elysia app (without calling `.listen()`), relative to Vite root.
+   * The server entry, relative to Vite root: the module that starts the app, usually with
+   * `start(app)` from `cyrenex/start`. `vp dev` runs it and forwards `routes` to it; `vp build`
+   * bundles it. It may live in another package of a monorepo: the app then runs in that
+   * package's directory, with its `.env` files.
+   * @default "server/main.ts"
+   */
+  server?: string;
+
+  /**
+   * Module default-exporting the app, relative to Vite root: its type is what `cyrenex/client`
+   * exposes to the frontend. Only read for types.
    * @default "server/app.ts"
    */
-  entry?: string;
+  app?: string;
 
   /**
    * Child process runtime, independent of the runtime running Vite.
@@ -77,18 +84,38 @@ export interface CyrenexOptions {
    */
   shutdownTimeout?: number;
 
+  /** What `vp build` produces. `false` leaves the build to Vite (the client only). */
+  build?: false | BuildOptions;
+}
+
+export interface BuildOptions {
   /**
-   * Build the production server with `vp build`: `entry` (your `serve(app)` module, relative
-   * to Vite root) is bundled to `outDir/main.mjs`, and the client build moves to `dist/client`
-   * unless you set its `outDir`. Dependencies stay external, as in Vite's SSR builds.
-   * Enabled by default when `server/main.ts` exists; `false` builds the client only.
-   * @default { entry: "server/main.ts", outDir: "dist/server" }
+   * Bundle `server` to `outDir/main.mjs`, runnable with `node` or `bun`; dependencies stay
+   * external, as in Vite's SSR builds. The client build then defaults to `dist/client`.
+   * `false` ships the server as source (run `bun server/main.ts`, or build it yourself).
+   * @default { outDir: "dist/server" } when the server entry exists
    */
-  build?: false | { entry?: string; outDir?: string };
+  server?: false | { outDir?: string };
+
+  /**
+   * Where the client build goes: a directory (relative to Vite root, possibly in the server's
+   * package of a monorepo), or a directory plus copies of it. Directories outside Vite root
+   * are emptied first, so they must not be a package root.
+   * @default Vite's `build.outDir`, or "dist/client" when the server is bundled
+   */
+  client?: string | { outDir?: string; copyTo?: string | string[] };
+
+  /**
+   * How you start the server, shown after building: `"pnpm start"`, `"bun --filter api start"`…
+   * cyrenex only prints it.
+   * @default the runtime on the built server, or on the entry when it ships as source
+   */
+  start?: string;
 }
 
 export interface ResolvedOptions {
-  entry: string;
+  server: string;
+  app: string;
   runtime: Runtime;
   routes: string[] | "auto";
   watch: false | string[];
@@ -96,8 +123,14 @@ export interface ResolvedOptions {
   execArgv: string[];
   env: Record<string, string>;
   shutdownTimeout: number;
-  /** `auto`: defaulted, so skipped when the entry does not exist. */
-  build: false | { entry: string; outDir: string; auto: boolean };
+  build:
+    | false
+    | {
+        /** `auto`: defaulted, so skipped when the entry does not exist. */
+        server: false | { outDir: string; auto: boolean };
+        client: { outDir: string | undefined; copyTo: string[] };
+        start: string | undefined;
+      };
 }
 
 /** Bootstrap data serialized by env-runner and delivered to the child over IPC. */
@@ -119,28 +152,9 @@ export interface WorkerControlMessage {
   event?: string;
 }
 
-/**
- * Framework side of the dev worker. Receives the entry's default export, validates it
- * synchronously, and returns a handle the worker drives without knowing the framework.
- */
-export type ServerAdapter = (exported: unknown) => ServerHandle;
-
 /** Sent by the worker once the app listens, next to env-runner's `address`. */
 export interface WorkerReadyMessage {
   address: { host: string; port: number };
   /** Route paths defined by the app, for `routes: "auto"`. */
   paths: string[];
-}
-
-export interface ServerHandle {
-  /**
-   * Run startup work (plugins, warm-up) and listen on a random port of `hostname`. Returns the
-   * port and the app's route paths.
-   */
-  listen(options: { hostname: string }): Promise<{ port: number; paths: string[] }>;
-  /**
-   * Stop the server and release app resources. May be called before `listen` settles or
-   * after it failed, and must still release whatever was acquired.
-   */
-  close(): Promise<void>;
 }

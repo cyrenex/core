@@ -5,6 +5,8 @@
     "moduleDetection": "force",
     "module": "nodenext",
     "moduleResolution": "nodenext",
+    // Workspace packages resolve to their source, so nothing needs building first.
+    "customConditions": ["cyrenex-source"],
     "types": ["node"],
     "strict": true,
     "noUnusedLocals": true,

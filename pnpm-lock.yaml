@@ -239,15 +239,9 @@ importers:
         specifier: npm:@voidzero-dev/vite-plus-core@1.5.0
         version: '@voidzero-dev/vite-plus-core@1.5.0(@types/node@26.6.6)(typescript@7.0.2)(yaml@2.9.1)'
     devDependencies:
-      '@elysia/eden':
-        specifier: 'catalog:'
-        version: 1.4.10(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
       '@elysia/node':
         specifier: 'catalog:'
         version: 1.4.6(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
-      '@elysia/static':
-        specifier: 'catalog:'
-        version: 1.4.11(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
       '@types/bun':
         specifier: 'catalog:'
         version: 1.4.4
@@ -264,8 +258,8 @@ importers:
         specifier: 'catalog:'
         version: 1.5.0(@types/node@26.6.6)(@vitest/ui@5.1.0)(typescript@7.0.2)(yaml@2.9.1)
 
-  playground:
-    dependencies:
+  packages/elysia:
+    devDependencies:
       '@elysia/eden':
         specifier: 'catalog:'
         version: 1.4.10(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
@@ -275,6 +269,36 @@ importers:
       '@elysia/static':
         specifier: 'catalog:'
         version: 1.4.11(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
+      '@types/bun':
+        specifier: 'catalog:'
+        version: 1.4.4
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      cyrenex:
+        specifier: workspace:*
+        version: link:../cyrenex
+      elysia:
+        specifier: 'catalog:'
+        version: 1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2)
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+      vite-plus:
+        specifier: 'catalog:'
+        version: 1.5.0(@types/node@26.6.6)(@vitest/ui@5.1.0)(typescript@7.0.2)(yaml@2.9.1)
+
+  playground:
+    dependencies:
+      '@cyrenex/elysia':
+        specifier: workspace:*
+        version: link:../packages/elysia
+      '@elysia/eden':
+        specifier: 'catalog:'
+        version: 1.4.10(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
+      '@elysia/node':
+        specifier: 'catalog:'
+        version: 1.4.6(elysia@1.4.30(@sinclair/typebox@0.34.52)(@types/bun@1.4.4)(exact-mirror@1.2.6)(file-type@22.3.0)(openapi-types@12.1.3)(typescript@7.0.2))
       cyrenex:
         specifier: workspace:*
         version: link:../packages/cyrenex

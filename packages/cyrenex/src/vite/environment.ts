@@ -9,14 +9,15 @@ import { NodeRequest, sendNodeResponse } from "srvx/node";
 import { createFilter, DevEnvironment, loadEnv, normalizePath } from "vite";
 import type { ErrorPayload, ResolvedConfig, ViteDevServer } from "vite";
 
+import { packageDirOf } from "./packages.ts";
 import { RuntimeProcessRunner } from "./process.ts";
 import type { ProcessOptions } from "./process.ts";
 import { matchesRoutes, normalizeRoutes, prefixesOf } from "./routes.ts";
 import { RESTART_EVENT } from "./types.ts";
 import type { ResolvedOptions, RestartEvent, WorkerReadyMessage } from "./types.ts";
 
-/** Owns request forwarding and process replacement for the Elysia app. */
-export class ElysiaEnvironment extends DevEnvironment {
+/** Owns request forwarding and process replacement for the server entry. */
+export class ServerEnvironment extends DevEnvironment {
   /** Stable HTTP/WS forwarding facade across child-process replacements. */
   private readonly backend: RunnerManager;
 
@@ -26,7 +27,7 @@ export class ElysiaEnvironment extends DevEnvironment {
   private readonly workerEntry: string;
   private readonly process: ProcessOptions;
   private readonly shutdownTimeout: number;
-  /** Absolute application entry used by the child module runner. */
+  /** Absolute server entry used by the child module runner. */
   private readonly entry: string;
   /** Matches extra watch patterns and the entry directory, excluding dependency stores. */
   private readonly matchesWatch: (id: unknown) => boolean;
@@ -53,7 +54,13 @@ export class ElysiaEnvironment extends DevEnvironment {
   private failure: ErrorPayload["err"] | undefined;
 
   constructor(name: string, config: ResolvedConfig, options: ResolvedOptions) {
-    const entry = normalizePath(resolve(config.root, options.entry));
+    const entry = normalizePath(resolve(config.root, options.server));
+    // In a monorepo the entry may belong to another package: run the app there, with its own
+    // `.env` files, as it runs in production.
+    const root = normalizePath(config.root);
+    const own = packageDirOf(root);
+    const server = packageDirOf(dirname(entry));
+    const elsewhere = server !== undefined && server !== own;
     const backend = new RunnerManager();
 
     super(name, config, {
@@ -76,10 +83,15 @@ export class ElysiaEnvironment extends DevEnvironment {
       // Every variable of `.env`, `.env.local`, `.env.[mode]`… not only `VITE_*`: the app is
       // server code. Existing process variables win, as in Vite. Vite restarts on changes.
       env: {
-        ...(config.envDir === false ? {} : loadEnv(config.mode, config.envDir, "")),
+        ...(elsewhere
+          ? loadEnv(config.mode, server, "")
+          : config.envDir === false
+            ? {}
+            : loadEnv(config.mode, config.envDir, "")),
         ...options.env,
       },
       execArgv: options.execArgv,
+      cwd: elsewhere ? server : undefined,
     };
     this.shutdownTimeout = options.shutdownTimeout;
     this.watching = options.watch !== false;
@@ -112,13 +124,13 @@ export class ElysiaEnvironment extends DevEnvironment {
 
     let response: Response;
     if (this.disposed || !this.backend.ready) {
-      response = new Response("Elysia server is unavailable", { status: 503 });
+      response = new Response("cyrenex: the server is unavailable", { status: 503 });
     } else {
       try {
         response = await this.backend.fetch(new NodeRequest({ req, res }));
       } catch (error) {
         this.logger.error(this.formatError(error), { timestamp: true });
-        response = new Response("Elysia server request failed", { status: 502 });
+        response = new Response("cyrenex: the server request failed", { status: 502 });
       }
     }
     await sendNodeResponse(res, response);
@@ -195,7 +207,7 @@ export class ElysiaEnvironment extends DevEnvironment {
       this.moduleGraph.invalidateAll();
 
       try {
-        // Graceful shutdown runs app.stop() → onStop → pond.dispose() in the old process.
+        // Graceful shutdown closes the server and disposes the Pond in the old process.
         await this.currentRunner?.shutdown(this.shutdownTimeout);
         if (this.disposed) return;
 

@@ -1,21 +1,17 @@
-import { pebble, PondError, ripple } from "@cyrenex/pondi";
-import type { Pond, TokenInput, Value } from "@cyrenex/pondi";
+import { pebble, ripple } from "cyrenex";
+import type { Pebble, Pond, TokenInput, Value } from "cyrenex";
+import {
+  assertEager,
+  attach,
+  current,
+  describeError,
+  exposeErrorsDefault,
+  PondError,
+  release,
+  scopeOf as scopeFor,
+} from "cyrenex/adapter";
 import { Elysia } from "elysia";
 import type { AnyElysia, Context } from "elysia";
-
-import { WARMUP } from "./warmup.ts";
-
-/**
- * Where `pondi()` stores the app's {@link PondHandle}. A registered symbol, so `cyrenex/testing`
- * finds it even when it loads a different copy of cyrenex.
- */
-export const POND: unique symbol = Symbol.for("cyrenex.pond") as never;
-
-/** The Pond attached by `pondi()`, and the fork requests use instead while overridden. */
-export interface PondHandle {
-  readonly root: Pond;
-  override: Pond | undefined;
-}
 
 /**
  * The current Elysia request context, available to `scoped` ripples:
@@ -29,38 +25,23 @@ export interface PondHandle {
  * It is registered as `scoped` in every request container, so a singleton depending on it
  * fails with `CAPTIVE_DEPENDENCY` instead of silently caching request data.
  */
-export const RequestContext = pebble<Context>("cyrenex:request");
-
-/** Request containers, created lazily the first time a route injects something. */
-const scopes = new WeakMap<Request, Pond>();
-
-const keyOf = (token: TokenInput) => (typeof token === "string" ? token : token.key);
+export const RequestContext: Pebble<Context> = pebble<Context>("cyrenex:request");
 
 interface PondContext {
   request: Request;
   pond?: Pond;
 }
 
+/** The request's fork, created the first time a route injects something. */
 function scopeOf(ctx: PondContext): Pond {
-  let scope = scopes.get(ctx.request);
-  if (scope) return scope;
   if (!ctx.pond) {
     throw new Error(
       "cyrenex: inject() requires a Pond on the app. Add it with app.use(pondi(pond)).",
     );
   }
-  scope = ctx.pond
-    .fork()
-    .use(ripple(RequestContext, () => ctx as unknown as Context, { mode: "scoped" }));
-  scopes.set(ctx.request, scope);
-  return scope;
-}
-
-async function release(request: Request | undefined): Promise<void> {
-  const scope = request && scopes.get(request);
-  if (!scope) return;
-  scopes.delete(request);
-  await scope.dispose();
+  return scopeFor(ctx.request, ctx.pond, (fork) => {
+    fork.use(ripple(RequestContext, () => ctx as unknown as Context, { mode: "scoped" }));
+  });
 }
 
 type WebSocketClose = (ws: { data: { request?: Request } }, ...rest: unknown[]) => unknown;
@@ -112,7 +93,7 @@ export interface PondiOptions {
   /**
    * Singletons to create before the app starts listening, so failures (a database refusing
    * connections, a missing provider, a cycle) fail startup instead of the first request.
-   * Awaited by the dev server; in production entries, `await warmup(app)` before listening.
+   * Awaited by `start()`; with your own listener, `await warmup(app)` before listening.
    */
   eager?: readonly TokenInput[];
 }
@@ -130,47 +111,26 @@ type PondiPlugin = Elysia<"", { decorator: { pond: Pond }; store: {}; derive: {}
  *   response; for WebSocket routes, when the connection closes.
  * - `pond.dispose()` runs on `app.stop()`, including every dev-server restart.
  * - A `PondError` becomes a 500 response describing the failing dependency path.
- * - `eager` singletons are created before the app listens; see {@link warmup}.
+ * - `eager` singletons are created before the app listens (`start()`, or `warmup(app)`).
  */
 export function pondi(pond: Pond, options: PondiOptions = {}) {
-  const expose = options.exposeErrors ?? process.env.NODE_ENV !== "production";
-  const eager = options.eager ?? [];
-  for (const token of eager) {
-    const mode = typeof token === "object" ? (token as { mode?: string }).mode : undefined;
-    if (mode && mode !== "singleton") {
-      throw new TypeError(
-        `cyrenex: eager "${keyOf(token)}" is ${mode}; only singletons can be created at startup`,
-      );
-    }
-  }
-
-  let warming: Promise<void> | undefined;
-  const warm = () =>
-    (warming ??= (async () => {
-      try {
-        await Promise.all(eager.map((token) => pond.resolve(token)));
-      } catch (error) {
-        await pond.dispose().catch(() => {});
-        throw error;
-      }
-    })());
+  const expose = options.exposeErrors ?? exposeErrorsDefault();
+  assertEager(options.eager ?? []);
 
   return (app: AnyElysia): PondiPlugin => {
     const webSocketPaths = new Set<string>();
     let seenRoutes = -1;
-    const handle: PondHandle = { root: pond, override: undefined };
-    Object.defineProperty(app, WARMUP, { value: warm, configurable: true });
-    Object.defineProperty(app, POND, { value: handle, configurable: true });
+    const attached = attach(app, pond, options);
 
     return app
       .decorate("pond", pond)
       .onStart(() => {
         // Fallback for apps that call .listen() themselves; it cannot be awaited here.
-        if (!warming) warm().catch((error: unknown) => console.error(error));
+        if (!attached.warming) attached.warm().catch((error: unknown) => console.error(error));
       })
       .onRequest((ctx) => {
         // `cyrenex/testing`: requests see the overriding fork while one is active.
-        if (handle.override) (ctx as { pond?: Pond }).pond = handle.override;
+        if (attached.handle.override) (ctx as { pond?: Pond }).pond = current(attached.handle);
         // Routes are final by the time requests arrive; re-scan only if more were added.
         if (app.routes.length === seenRoutes) return;
         seenRoutes = app.routes.length;
@@ -187,11 +147,7 @@ export function pondi(pond: Pond, options: PondiOptions = {}) {
       .onError({ as: "global" }, ({ error, set }) => {
         if (!(error instanceof PondError)) return;
         set.status = 500;
-        if (expose) {
-          return { error: error.name, code: error.code, message: error.message, path: error.path };
-        }
-        console.error(error);
-        return { error: "Internal Server Error" };
+        return describeError(error, expose);
       })
       .onStop(async () => {
         await pond.dispose();
